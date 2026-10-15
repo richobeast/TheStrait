@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Strait! (Beta 0.0.1)</title>
+<style>
+  :root {
+    --sand: #e8d5ae; --sand-dim: #b9a47e; --ink: #f4ead6; --muted: #a9997a; --panel: rgba(18, 15, 11, 0.78);
+    --line: rgba(232, 213, 174, 0.18); --accent: #e3a33b; --blue: #5fb0ff; --red: #ff6a55; --ok: #8fd16a;
+    font-family: Bahnschrift, "DIN Alternate", "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a140d; color: var(--ink); user-select: none; }
+  canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .hidden { display: none !important; }
+  button { font: inherit; cursor: pointer; }
+  input, select { font: inherit; }
+
+  /* ---------- Menu ---------- */
+  #menu { position: fixed; inset: 0; display: flex; background: linear-gradient(90deg, rgba(20,15,9,0.92) 0%, rgba(20,15,9,0.75) 38%, rgba(20,15,9,0.05) 70%); }
+  #menu .col { width: min(520px, 100%); padding: 48px 44px; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; }
+  .logo { line-height: 0.9; }
+  .logo .t1 { font-size: 64px; font-weight: 700; letter-spacing: 2px; color: var(--sand); text-shadow: 0 3px 0 #000; }
+  .logo .t2 { font-size: 64px; font-weight: 700; letter-spacing: 2px; color: var(--accent); text-shadow: 0 3px 0 #000; }
+  .logo .sub { margin-top: 10px; font-size: 14px; letter-spacing: 4px; color: var(--muted); text-transform: uppercase; }
+  .field label { display: block; font-size: 12px; letter-spacing: 3px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .field input[type=text] { width: 100%; padding: 11px 14px; background: rgba(0,0,0,0.45); border: 1px solid var(--line); color: var(--ink); font-size: 18px; outline: none; }
+  .field input[type=text]:focus { border-color: var(--accent); }
+  .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
+  .seg button { padding: 11px 8px; background: rgba(0,0,0,0.4); border: 1px solid var(--line); color: var(--ink); font-size: 15px; letter-spacing: 1px; text-transform: uppercase; }
+  .seg button small { display: block; font-size: 11px; color: var(--muted); letter-spacing: 0.5px; text-transform: none; margin-top: 3px; }
+  .seg button.on { border-color: var(--accent); background: rgba(227,163,59,0.16); }
+  .seg button.t1.on { border-color: var(--blue); background: rgba(95,176,255,0.14); }
+  .seg button.t2.on { border-color: var(--red); background: rgba(255,106,85,0.14); }
+  .btn { padding: 15px 18px; font-size: 20px; letter-spacing: 3px; text-transform: uppercase; font-weight: 700; border: none; background: var(--accent); color: #1b1309; box-shadow: 0 4px 0 #8a5f1c; transition: transform .06s; }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:active { transform: translateY(2px); box-shadow: 0 2px 0 #8a5f1c; }
+  .btn.ghost { background: rgba(0,0,0,0.45); color: var(--ink); border: 1px solid var(--line); box-shadow: none; font-size: 15px; padding: 12px 14px; }
+  .btn.ghost:hover { border-color: var(--accent); }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .note { font-size: 13px; color: var(--muted); line-height: 1.5; }
+  .status { font-size: 13px; color: var(--accent); min-height: 18px; }
+  .controls { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 13px; color: var(--muted); }
+  .controls b { color: var(--ink); font-weight: 600; }
+  .slider { display: grid; grid-template-columns: 110px 1fr 44px; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .slider input { width: 100%; accent-color: var(--accent); }
+  .panel { background: var(--panel); border: 1px solid var(--line); padding: 16px; }
+  details summary { cursor: pointer; font-size: 12px; letter-spacing: 3px; text-transform: uppercase; color: var(--muted); }
+  details[open] summary { margin-bottom: 12px; }
+  #lobbyList { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+  #lobbyList .lob { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: rgba(0,0,0,0.4); border: 1px solid var(--line); cursor: pointer; }
+  #lobbyList .lob:hover { border-color: var(--accent); }
+  .steam-badge { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .steam-badge i { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
+  .steam-badge.off i { background: #776; }
+
+  /* ---------- HUD ---------- */
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+  #crosshair i { position: absolute; background: rgba(255,255,255,0.92); box-shadow: 0 0 2px rgba(0,0,0,0.9); }
+  #crosshair .u, #crosshair .d { width: 2px; height: 9px; left: -1px; }
+  #crosshair .l, #crosshair .r { height: 2px; width: 9px; top: -1px; }
+  #crosshair .dot { width: 2px; height: 2px; left: -1px; top: -1px; }
+  #hitmarker { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; opacity: 0; transition: opacity .15s; }
+  #hitmarker::before, #hitmarker::after { content: ""; position: absolute; left: 12px; top: -1px; width: 2px; height: 28px; background: #fff; box-shadow: 0 0 2px #000; }
+  #hitmarker::before { transform: rotate(45deg); } #hitmarker::after { transform: rotate(-45deg); }
+  #hitmarker.head::before, #hitmarker.head::after { background: #ffd34d; }
+  #hitmarker.kill::before, #hitmarker.kill::after { background: #ff3b30; width: 3px; }
+  #scope { position: absolute; inset: 0; background: radial-gradient(circle at 50% 50%, transparent 0, transparent 34vh, #000 34.3vh); }
+  #scope::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: rgba(0,0,0,0.9); }
+  #scope::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: rgba(0,0,0,0.9); }
+  #scope.acog { background: radial-gradient(circle at 50% 50%, transparent 0, transparent 30vh, rgba(0,0,0,0.85) 30.5vh, #000 33vh); }
+  #scope.acog::before, #scope.acog::after { display: none; }
+  #scope .chev { display: none; position: absolute; left: 50%; top: 50%; width: 0; height: 0; margin-left: -9px; border-left: 9px solid transparent; border-right: 9px solid transparent; border-bottom: 14px solid #ffb21e; filter: drop-shadow(0 0 3px rgba(255,170,30,0.8)); }
+  #scope.acog .chev { display: block; }
+  #scope .chev::after { content: ""; position: absolute; left: -1px; top: 14px; width: 2px; height: 40px; background: rgba(0,0,0,0.85); }
+  .gunsmith { display: flex; flex-direction: column; gap: 12px; }
+  .gs-gun { background: rgba(0,0,0,0.3); border: 1px solid var(--line); padding: 10px 12px; }
+  .gs-name { font-size: 15px; letter-spacing: 1px; margin-bottom: 8px; }
+  .gs-name small { color: var(--muted); font-size: 12px; margin-left: 6px; }
+  .gs-row { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+  .seg.sm button { padding: 6px 4px; font-size: 11.5px; letter-spacing: 0.3px; text-transform: none; }
+  .gs-sum { margin-top: 6px; font-size: 12px; color: var(--accent); }
+  #vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 45%, rgba(150,0,0,0.85) 100%); opacity: 0; }
+  #flash { position: absolute; inset: 0; background: #fff8e6; opacity: 0; }
+  #dmgDirs { position: absolute; left: 50%; top: 50%; }
+  #dmgDirs .arc { position: absolute; left: -60px; top: -170px; width: 120px; height: 40px; border-top: 6px solid rgba(255,40,30,0.9); border-radius: 50% 50% 0 0 / 100% 100% 0 0; transform-origin: 60px 170px; filter: drop-shadow(0 0 4px rgba(255,0,0,0.6)); }
+  #nadeWarn { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+  #nadeWarn .ico { position: absolute; left: -18px; top: -128px; width: 36px; height: 36px; border-radius: 50%; background: rgba(0,0,0,0.6); border: 2px solid #ff3b30; color: #ff3b30; font-weight: 700; display: grid; place-items: center; font-size: 18px; transform-origin: 18px 128px; }
+
+  .tl { position: absolute; left: 18px; top: 18px; }
+  #minimap { width: 200px; height: 200px; border-radius: 50%; border: 2px solid rgba(232,213,174,0.35); background: rgba(0,0,0,0.35); display: block; }
+  #fps { margin-top: 6px; font-size: 11px; color: rgba(244,234,214,0.55); text-align: center; width: 200px; }
+  #scorebar { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: stretch; gap: 0; font-weight: 700; text-shadow: 0 1px 2px #000; }
+  #scorebar .s { min-width: 120px; padding: 6px 12px; font-size: 26px; display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.5); }
+  #scorebar .s small { font-size: 11px; letter-spacing: 2px; opacity: 0.85; }
+  #scorebar .s1 { justify-content: flex-end; border-bottom: 3px solid var(--blue); }
+  #scorebar .s2 { border-bottom: 3px solid var(--red); }
+  #scorebar .time { padding: 6px 14px; font-size: 22px; background: rgba(0,0,0,0.7); display: flex; align-items: center; }
+  #scorebar .mine { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.25); }
+  #killfeed { position: absolute; right: 18px; top: 18px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 15px; }
+  #killfeed div { background: rgba(0,0,0,0.5); padding: 4px 10px; transition: opacity .5s; white-space: nowrap; }
+  #killfeed .w { color: var(--muted); margin: 0 8px; font-size: 13px; }
+  #killfeed .me { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4); }
+  .c1 { color: var(--blue); } .c2 { color: var(--red); } .c0 { color: #c8c0ae; }
+  #chat { position: absolute; left: 18px; bottom: 120px; width: 420px; font-size: 14px; text-shadow: 0 1px 2px #000; }
+  #chatLog div { padding: 2px 0; transition: opacity 1s; }
+  #chatLog div.fade { opacity: 0; }
+  #chat.open #chatLog div { opacity: 1 !important; }
+  #chatInput { width: 100%; margin-top: 6px; padding: 7px 10px; background: rgba(0,0,0,0.65); border: 1px solid var(--accent); color: var(--ink); outline: none; pointer-events: auto; }
+  #health { position: absolute; left: 18px; bottom: 24px; width: 300px; }
+  #health .lbl { display: flex; justify-content: space-between; font-size: 13px; letter-spacing: 2px; color: var(--sand); margin-bottom: 6px; text-shadow: 0 1px 2px #000; }
+  #health .lbl b { font-size: 30px; letter-spacing: 0; line-height: 0.8; }
+  #health .bar { height: 10px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.15); }
+  #health .bar i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #d6c296, #f1e3c1); transition: width .12s; }
+  #health.low .bar i { background: linear-gradient(90deg, #b3261e, #ff5a4a); }
+  #ammo { position: absolute; right: 22px; bottom: 22px; text-align: right; text-shadow: 0 2px 3px #000; }
+  #ammo .wname { font-size: 14px; letter-spacing: 3px; color: var(--sand); text-transform: uppercase; }
+  #ammo .count { font-size: 54px; font-weight: 700; line-height: 1; }
+  #ammo .count small { font-size: 24px; color: var(--muted); font-weight: 600; }
+  #ammo .count.low { color: #ff6a55; }
+  #ammo .nades { margin-top: 4px; font-size: 13px; letter-spacing: 2px; color: var(--sand); }
+  #ammo .hint { font-size: 13px; color: #ffd34d; letter-spacing: 2px; min-height: 16px; }
+  #center { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); text-align: center; text-shadow: 0 2px 4px #000; }
+  #center .big { font-size: 22px; font-weight: 700; letter-spacing: 3px; color: #fff; }
+  #center .pts { font-size: 18px; color: var(--accent); font-weight: 700; }
+  #center > div { animation: pop .25s ease-out; }
+  @keyframes pop { from { transform: scale(1.35); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  #protect { position: absolute; left: 50%; top: 40%; transform: translateX(-50%); font-size: 14px; letter-spacing: 3px; color: var(--sand); opacity: 0.85; text-shadow: 0 1px 2px #000; }
+  #ping { position: absolute; right: 22px; bottom: 6px; font-size: 11px; color: rgba(244,234,214,0.5); }
+
+  /* overlays */
+  .overlay { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: auto; }
+  #death { background: radial-gradient(circle, rgba(60,0,0,0.25), rgba(30,0,0,0.65)); pointer-events: none; }
+  #death .box { text-align: center; text-shadow: 0 2px 6px #000; }
+  #death .k { font-size: 16px; letter-spacing: 4px; color: var(--muted); }
+  #death .n { font-size: 44px; font-weight: 700; margin: 6px 0 4px; }
+  #death .w { font-size: 16px; color: var(--sand); }
+  #death .r { margin-top: 26px; font-size: 18px; letter-spacing: 3px; }
+  #scoreboard { background: rgba(0,0,0,0.25); pointer-events: none; }
+  #scoreboard .wrap, #endScreen .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; width: min(900px, 94vw); }
+  .team-table { background: var(--panel); border: 1px solid var(--line); }
+  .team-table h3 { margin: 0; padding: 10px 14px; font-size: 18px; letter-spacing: 3px; display: flex; justify-content: space-between; }
+  .team-table.t1 h3 { border-bottom: 3px solid var(--blue); color: var(--blue); }
+  .team-table.t2 h3 { border-bottom: 3px solid var(--red); color: var(--red); }
+  .team-table table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  .team-table th { text-align: left; font-size: 11px; letter-spacing: 2px; color: var(--muted); font-weight: 600; padding: 8px 14px 4px; }
+  .team-table td { padding: 6px 14px; border-top: 1px solid rgba(255,255,255,0.05); }
+  .team-table td.n, .team-table th.n { text-align: right; width: 54px; }
+  .team-table tr.me td { background: rgba(255,255,255,0.08); }
+  .team-table .bot { color: var(--muted); }
+  #pause { background: rgba(10,8,5,0.72); }
+  #pause .box, #msgBox .box { width: min(560px, 94vw); max-height: 94vh; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+  #pause h2, #msgBox h2 { margin: 0 0 4px; font-size: 34px; letter-spacing: 4px; color: var(--sand); }
+  #endScreen { background: rgba(10,8,5,0.78); }
+  #endScreen .head { text-align: center; margin-bottom: 18px; }
+  #endScreen .res { font-size: 72px; font-weight: 700; letter-spacing: 6px; }
+  #endScreen .sub { color: var(--muted); letter-spacing: 3px; }
+  #msgBox { background: rgba(10,8,5,0.82); z-index: 10; }
+  #toast { position: fixed; left: 50%; bottom: 140px; transform: translateX(-50%); padding: 10px 18px; background: var(--panel); border: 1px solid var(--accent); font-size: 14px; letter-spacing: 1px; transition: opacity .4s; pointer-events: none; z-index: 20; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="vignette"></div>
+  <div id="flash"></div>
+  <div id="scope" class="hidden"><div class="chev"></div></div>
+  <div id="crosshair"><i class="u"></i><i class="d"></i><i class="l"></i><i class="r"></i><i class="dot"></i></div>
+  <div id="hitmarker"></div>
+  <div id="dmgDirs"></div>
+  <div id="nadeWarn" class="hidden"><div class="ico">!</div></div>
+  <div class="tl"><canvas id="minimap" width="200" height="200"></canvas><div id="fps"></div></div>
+  <div id="scorebar">
+    <div class="s s1"><small>MARINES</small><span id="sc1">0</span></div>
+    <div class="time" id="timer">10:00</div>
+    <div class="s s2"><span id="sc2">0</span><small>IRAN</small></div>
+  </div>
+  <div id="killfeed"></div>
+  <div id="chat"><div id="chatLog"></div><input id="chatInput" class="hidden" maxlength="120" placeholder="Say something… (Enter to send, Esc to cancel)"></div>
+  <div id="health"><div class="lbl"><span>HEALTH</span><b id="hpNum">100</b></div><div class="bar"><i id="hpBar"></i></div></div>
+  <div id="ammo">
+    <div class="hint" id="ammoHint"></div>
+    <div class="wname" id="wName">M4A1</div>
+    <div class="count" id="ammoCount">30 <small>/ 150</small></div>
+    <div class="nades" id="nadeCount">GRENADES ● ●</div>
+  </div>
+  <div id="center"></div>
+  <div id="protect" class="hidden">SPAWN PROTECTION</div>
+  <div id="ping"></div>
+</div>
+
+<div id="death" class="overlay hidden">
+  <div class="box"><div class="k">KILLED BY</div><div class="n" id="deathBy">—</div><div class="w" id="deathW"></div><div class="r" id="deathTimer">Redeploying in 4</div></div>
+</div>
+
+<div id="scoreboard" class="overlay hidden"><div class="wrap" id="sbWrap"></div></div>
+
+<div id="endScreen" class="overlay hidden">
+  <div>
+    <div class="head"><div class="res" id="endRes">VICTORY</div><div class="sub" id="endSub">Next match in 12</div></div>
+    <div class="wrap" id="endWrap"></div>
+  </div>
+</div>
+
+<div id="pause" class="overlay hidden">
+  <div class="box panel">
+    <h2>PAUSED</h2>
+    <button class="btn" id="btnResume">Resume</button>
+    <div class="field"><label>Loadout (next spawn)</label><div class="seg" id="pauseLoadout"></div></div>
+    <details class="panel" style="padding:12px"><summary>Attachments (next spawn)</summary><div id="pauseGunsmith" class="gunsmith"></div></details>
+    <div class="row"><button class="btn ghost" id="btnSwitchTeam">Switch team</button><button class="btn ghost" id="btnInvite">Invite friends</button></div>
+    <details class="panel" style="padding:12px"><summary>Settings</summary><div id="pauseSettings"></div></details>
+    <button class="btn ghost" id="btnLeave">Leave match</button>
+  </div>
+</div>
+
+<div id="msgBox" class="overlay hidden"><div class="box panel"><h2 id="msgTitle">Disconnected</h2><div class="note" id="msgText"></div><button class="btn" id="msgOk">Back to menu</button></div></div>
+
+<div id="menu">
+  <div class="col">
+    <div class="logo"><div class="t1">THE</div><div class="t2">STRAIT!</div><div class="sub">Team Deathmatch · Hormuz Port</div><div class="sub" style="margin-top:4px;color:var(--accent)">Beta 0.0.1</div></div>
+    <div id="steamBadge" class="steam-badge off hidden"><i></i><span>Steam not running</span></div>
+
+    <div class="field"><label>Callsign</label><input type="text" id="nameInput" maxlength="18" spellcheck="false"></div>
+    <div class="field"><label>Team</label>
+      <div class="seg" id="teamSeg">
+        <button data-team="0" class="on">Auto</button>
+        <button data-team="1" class="t1">U.S. Marines</button>
+        <button data-team="2" class="t2">Iran</button>
+      </div>
+    </div>
+    <div class="field"><label>Primary weapon</label><div class="seg" id="loadoutSeg"></div></div>
+    <details class="panel"><summary>Attachments</summary><div id="gunsmith" class="gunsmith"></div></details>
+
+    <!-- Browser / dedicated-server mode -->
+    <div id="webPlay"><button class="btn" id="btnDeploy" style="width:100%">Deploy</button></div>
+
+    <!-- Desktop (Steam) mode -->
+    <div id="steamPlay" class="hidden" style="display:flex;flex-direction:column;gap:10px">
+      <div class="panel">
+        <div class="slider"><span>Bots</span><input type="range" id="botSlider" min="0" max="14" step="2" value="8"><span id="botVal">8</span></div>
+        <div class="seg" id="visSeg" style="margin:8px 0 12px">
+          <button data-vis="1" class="on">Friends only</button><button data-vis="2">Public</button>
+        </div>
+        <div class="row"><button class="btn" id="btnHost">Host game</button><button class="btn ghost" id="btnOffline">Practice vs bots</button></div>
+      </div>
+      <details class="panel" id="findPanel"><summary>Find games</summary>
+        <div id="lobbyList"><div class="note">Searching…</div></div>
+        <button class="btn ghost" id="btnRefresh" style="margin-top:8px;width:100%">Refresh</button>
+      </details>
+      <details class="panel"><summary>Direct connect</summary>
+        <div class="row"><input type="text" id="addrInput" placeholder="192.168.1.20:3000" style="padding:10px;background:rgba(0,0,0,.45);border:1px solid var(--line);color:var(--ink)"><button class="btn ghost" id="btnDirect" style="flex:0 0 auto">Connect</button></div>
+        <div class="note" style="margin-top:8px">For dedicated servers started with <b>npm run server</b>.</div>
+      </details>
+      <button class="btn ghost" id="btnQuit">Quit to desktop</button>
+    </div>
+    <div class="status" id="menuStatus"></div>
+
+    <details class="panel"><summary>Settings</summary><div id="menuSettings"></div></details>
+    <details class="panel"><summary>Controls</summary>
+      <div class="controls">
+        <b>WASD</b><span>Move</span><b>Mouse</b><span>Aim · Left fire · Right aim down sights</span>
+        <b>Shift</b><span>Sprint</span><b>Space</b><span>Jump</span><b>C</b><span>Crouch</span>
+        <b>R</b><span>Reload</span><b>1 / 2 / Q / Wheel</b><span>Switch weapon</span><b>G</b><span>Throw grenade</span>
+        <b>Tab</b><span>Scoreboard</span><b>Enter / T</b><span>Chat</span><b>Esc</b><span>Pause menu</span>
+      </div>
+    </details>
+    <div class="note">First team to 75 kills or the most kills after 10 minutes wins. Bots fill empty slots.</div>
+  </div>
+</div>
+
+<div id="toast" style="opacity:0"></div>
+
+<script src="/shared/common.js"></script>
+<script type="module" src="/game.js"></script>
+</body>
+</html>

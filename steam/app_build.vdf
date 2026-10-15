@@ -1,0 +1,22 @@
+"AppBuild"
+{
+	"AppID"         "REPLACE_WITH_YOUR_APP_ID"
+	"Desc"          "Iraq Warfare Beta 0.0.1 (Windows)"
+	"ContentRoot"   "..\dist\IraqWarfare-win32-x64\"
+	"BuildOutput"   ".\output\"
+	"SetLive"       ""
+
+	"Depots"
+	{
+		"REPLACE_WITH_YOUR_WINDOWS_DEPOT_ID"
+		{
+			"FileMapping"
+			{
+				"LocalPath"  "*"
+				"DepotPath"  "."
+				"recursive"  "1"
+			}
+			"FileExclusion" "*.pdb"
+		}
+	}
+}

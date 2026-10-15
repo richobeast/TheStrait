@@ -11,11 +11,12 @@ const C = require('./shared/common.js');
 const ROOT = __dirname;
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.json': 'application/json', '.woff2': 'font/woff2',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.gltf': 'model/gltf+json', '.bin': 'application/octet-stream', '.hdr': 'application/octet-stream', '.ico': 'image/x-icon', '.json': 'application/json', '.woff2': 'font/woff2',
 };
 const MOUNTS = [
   ['/shared/', path.join(ROOT, 'shared')],
   ['/vendor/three/', path.join(ROOT, 'node_modules', 'three', 'build')],
+  ['/vendor/three-addons/', path.join(ROOT, 'node_modules', 'three', 'examples', 'jsm')],
   ['/', path.join(ROOT, 'public')],
 ];
 

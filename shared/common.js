@@ -259,6 +259,7 @@
     const boxes = [];
     const palms = [];
     const tanks = [];
+    const decoProps = []; // small models with no collision (jerry cans, ammo boxes)
     const box = (x, z, w, d, h, mat, y, extra) => {
       const b = { min: [x - w / 2, y || 0, z - d / 2], max: [x + w / 2, (y || 0) + h, z + d / 2], mat };
       if (extra) Object.assign(b, extra);
@@ -358,10 +359,12 @@
       box(x, z, 0.6, 0.6, 0.5, 'metal', 2.3); // turret
       box(x, z, alongX ? L - 0.8 : W, alongX ? W : L - 0.8, 0.45, 'tire', 0);
     }
-    function crate(x, z, s, h, y) { box(x, z, s, s, h || s, 'wood', y); }
+    function crate(x, z, s, h, y) { box(x, z, s, s, h || s, 'wood', y, { prop: 'crate' }); }
     function barrels(x, z, n, mat) {
-      for (let i = 0; i < n; i++) box(x + (i % 2) * 0.75, z + Math.floor(i / 2) * 0.75, 0.62, 0.62, 1.0, mat || 'drum');
+      for (let i = 0; i < n; i++) box(x + (i % 2) * 0.75, z + Math.floor(i / 2) * 0.75, 0.62, 0.62, 1.0, mat || 'drum', 0, { prop: mat === 'drumred' ? 'barrel_red' : 'barrel_blue', rot: i * 1.3 });
     }
+    // concrete jersey barrier (2 m long)
+    function barrier(x, z, alongX) { box(x, z, alongX ? 2.0 : 0.62, alongX ? 0.62 : 2.0, 1.05, 'barrier', 0, { prop: 'barrier', rot: alongX ? 0 : Math.PI / 2 }); }
     function sandbags(x, z, len, alongX) { box(x, z, alongX ? len : 1.0, alongX ? 1.0 : len, 1.1, 'sandbag'); }
     function hesco(x, z, len, alongX, h) { box(x, z, alongX ? len : 1.3, alongX ? 1.3 : len, h || 2.2, 'hesco'); }
     function twall(x, z, len, alongX) { box(x, z, alongX ? len : 0.6, alongX ? 0.6 : len, 3.6, 'concrete'); }
@@ -463,6 +466,9 @@
       box(-68, Z(40), 0.5, 10, 2.4, 'mud');
       box(-34, Z(30), 6, 0.5, 2.2, 'mud2');
       palm(-30, Z(10), 8); palm(-55, Z(8), 9); palm(-70, Z(55), 9);
+      barrier(-6.2, Z(15), true); barrier(6.6, Z(14), true); barrier(-24, Z(3), false); barrier(24, Z(3), false);
+      decoProps.push({ type: 'jerrycan', x: -7.1, z: Z(31.9), rot: 0.4 }, { type: 'jerrycan', x: 9.0, z: Z(21), rot: 2.1 },
+        { type: 'ammo', x: -8.7, z: Z(28.9), rot: 1.2 }, { type: 'jerrycan', x: -45.2, z: Z(32), rot: 3.0 }, { type: 'ammo', x: 29.5, z: Z(26.4), rot: 0.2 });
 
       // east: the port
       B(26, 24, 18, 12, 7.0, ['w', 'e', 'n'], 's', 'corrugated', { dw: 3.4, dh: 3.6, roof: 'roofmetal' });
@@ -501,6 +507,7 @@
       sandbags(-6, -57.5, 2.0, true); sandbags(6, -57.5, 2.0, true);
       box(-50, -62, 8, 0.6, 2.0, 'mud2'); box(50, -62, 8, 0.6, 2.0, 'mud2');
       car(-62, -66, false, 'burnt'); car(55, -66, false, 'truck');
+      decoProps.push({ type: 'jerrycan', x: 2.6, z: -61.6, rot: 0.8 }, { type: 'jerrycan', x: 3.1, z: -61.2, rot: 2.2 }, { type: 'ammo', x: -3.5, z: -58.4, rot: 1.0 });
     }
 
     // South: U.S. Marines FOB
@@ -515,6 +522,7 @@
       guardTower(-29, 59.5); guardTower(29, 59.5);
       box(-50, 62, 8, 1.3, 2.2, 'hesco'); box(50, 62, 8, 1.3, 2.2, 'hesco');
       humvee(-62, 66, false); humvee(55, 66, false);
+      decoProps.push({ type: 'ammo', x: 1.5, z: 58.6, rot: 0.3 }, { type: 'ammo', x: -1.2, z: 58.7, rot: 2.5 }, { type: 'jerrycan', x: -4.2, z: 62.4, rot: 1.6 });
     }
 
     // Town skyline beyond the wall (visual only), none over the water
@@ -533,7 +541,7 @@
     const spawns = { 1: south.map(([x, z]) => [x, 0, z]), 2: south.map(([x, z]) => [x, 0, -z]) };
 
     const solids = boxes.filter((b) => !b.deco);
-    return { boxes, solids, palms, tanks, skyline, spawns, size: E, quay: QUAY };
+    return { boxes, solids, palms, tanks, decoProps, skyline, spawns, size: E, quay: QUAY };
   }
 
   C.MAP = buildMap();

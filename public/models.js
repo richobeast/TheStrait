@@ -33,8 +33,8 @@ function std(hex, rough, metal, extra) {
 }
 const M = {
   black: std(0x1d1e1f, 0.6, 0.3),
-  metal: std(0x2a2c2f, 0.42, 0.7),
-  steel: std(0x45484c, 0.35, 0.85),
+  metal: std(0x34363a, 0.45, 0.45),
+  steel: std(0x4a4d51, 0.38, 0.6),
   polymer: std(0x232323, 0.82, 0.05),
   fde: std(0x8e7854, 0.78, 0.05),
   od: std(0x4e5540, 0.8, 0.05),

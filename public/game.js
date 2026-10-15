@@ -1,5 +1,6 @@
 import * as THREE from '/vendor/three/three.module.js';
 import { buildGun, buildSoldier, poseSoldier, buildViewArms, mergeGeos } from '/models.js';
+import { createPost, loadSky, loadPBR, withRepeat, loadProp, instanceProp } from '/graphics.js';
 
 const C = window.COMMON;
 const STEAM = window.steam || null; // provided by the desktop app's preload script
@@ -16,7 +17,7 @@ const weaponName = (key, team) => (key === 'nade' ? 'Grenade' : C.WEAPONS[key] ?
 
 // ---------- Settings ----------
 const settings = Object.assign(
-  { name: '', sens: 1.0, fov: 75, volume: 0.7, shadows: true, team: 0, primary: 'rifle', bots: 8, vis: 1, att: {} },
+  { name: '', sens: 1.0, fov: 75, volume: 0.7, shadows: true, gfx: 'high', team: 0, primary: 'rifle', bots: 8, vis: 1, att: {} },
   (() => { try { return JSON.parse(localStorage.getItem('iw_settings') || '{}'); } catch { return {}; } })(),
 );
 settings.att = Object.fromEntries(WKEYS.map((k) => [k, C.cleanAtt(k, (settings.att && settings.att[k]) || C.DEFAULT_ATT[k])]));
@@ -55,7 +56,7 @@ const boomLight = new THREE.PointLight(0xff9a40, 0, 30, 2);
 scene.add(boomLight);
 
 // Sky dome
-const sky = new THREE.Mesh(
+const skyMesh = new THREE.Mesh(
   new THREE.SphereGeometry(600, 24, 12),
   new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
@@ -70,8 +71,8 @@ const sky = new THREE.Mesh(
       }`,
   }),
 );
-sky.renderOrder = -1;
-scene.add(sky);
+skyMesh.renderOrder = -1;
+scene.add(skyMesh);
 
 // Image-based lighting so metal and polymer on guns and soldiers catch the desert light
 const envMap = (() => {
@@ -254,6 +255,7 @@ const MATDEF = {
   cloth1: [clothTex('#a8423a', '#d9c7a0'), 1.6], cloth2: [clothTex('#3b5e8c', '#d9d0b8'), 1.6],
   cloth3: [clothTex('#5b7a3a', '#c9b98a'), 1.6], cloth4: [clothTex('#c99a32', '#8a3a2a'), 1.6],
   window: [windowTex, 0, null, true],
+  barrier: [concreteTex('#b8b3a8'), 2],
   corrugated: [corrugatedTex('#b9b4a6', 0.15), 3], roofmetal: [corrugatedTex('#8f8c84', 0.2), 3],
   cont_red: [corrugatedTex('#9c3226'), 2.6], cont_blue: [corrugatedTex('#2d4f7c'), 2.6], cont_green: [corrugatedTex('#3f6b47'), 2.6],
   cont_orange: [corrugatedTex('#c0662a'), 2.6], cont_gray: [corrugatedTex('#7d8288'), 2.6],
@@ -309,6 +311,7 @@ function buildWorld() {
   const QX = C.MAP.quay;
   sand.repeat.set((QX + 300) / 8, 600 / 8);
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(QX + 300, 600), new THREE.MeshLambertMaterial({ map: sand }));
+  worldPlanes.ground = ground;
   ground.rotation.x = -Math.PI / 2;
   ground.position.x = (QX - 300) / 2;
   ground.receiveShadow = true;
@@ -331,12 +334,14 @@ function buildWorld() {
   const plaza = new THREE.Mesh(new THREE.PlaneGeometry(32, 32), new THREE.MeshLambertMaterial({ map: plazaT, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
   plaza.rotation.x = -Math.PI / 2; plaza.position.y = 0.02; plaza.receiveShadow = true;
   scene.add(ns, ew, plaza);
+  Object.assign(worldPlanes, { ns, ew, plaza });
 
   // port apron, sea, fuel tanks, shipping and the far shore
   const apronT = concreteTex('#aaa69d'); apronT.repeat.set((QX - 17) / 5, 154 / 5);
   const apron = new THREE.Mesh(new THREE.PlaneGeometry(QX - 17, 154), new THREE.MeshLambertMaterial({ map: apronT, polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -0.5 }));
   apron.rotation.x = -Math.PI / 2; apron.position.set((QX + 17) / 2, 0.006, 0); apron.receiveShadow = true;
   scene.add(apron);
+  worldPlanes.apron = apron;
   waterTex = tex((g, s) => {
     g.fillStyle = '#2e6a7c'; g.fillRect(0, 0, s, s);
     blotches(g, s, 10, '18,58,78', 0.35, s * 0.25);
@@ -348,6 +353,7 @@ function buildWorld() {
   }, 256);
   waterTex.repeat.set(70, 140);
   const water = new THREE.Mesh(new THREE.PlaneGeometry(700, 1400), new THREE.MeshPhongMaterial({ map: waterTex, shininess: 80, specular: 0x8899aa }));
+  worldPlanes.water = water;
   water.rotation.x = -Math.PI / 2; water.position.set(QX + 350, -0.55, 0); water.receiveShadow = true;
   scene.add(water);
   const tankMat = new THREE.MeshLambertMaterial({ map: MATDEF.tank[0] }), bandMat = new THREE.MeshLambertMaterial({ color: 0xa3392b });
@@ -400,25 +406,38 @@ function buildWorld() {
   for (const k of ['hull', 'white', 'red', 'gray']) if (shipGeo[k].length) scene.add(new THREE.Mesh(mergeGeos(shipGeo[k]), shipMats[k]));
   shipGeo.boxes.forEach((list, i) => { if (list.length) scene.add(new THREE.Mesh(mergeGeos(list), lam2(boxCols[i]))); });
   // far shore across the strait
-  const hills = [];
-  for (let i = 0; i < 26; i++) {
-    const z = -520 + i * 42 + (rand() - 0.5) * 30, x = 360 + rand() * 80, r = 50 + rand() * 70, h = 25 + rand() * 60;
-    const c = new THREE.ConeGeometry(r, h, 7); c.translate(x, h / 2 - 3, z); hills.push(c);
+  // a smooth ridge line built from layered sine noise, fading into the water at its edges
+  const ridge = new THREE.PlaneGeometry(220, 1500, 44, 220);
+  ridge.rotateX(-Math.PI / 2);
+  const rp = ridge.attributes.position;
+  const noise = (x, z) => Math.sin(z * 0.011 + 1.3) * 0.5 + Math.sin(z * 0.027 + x * 0.01) * 0.3 + Math.sin(z * 0.071 + x * 0.05 + 2) * 0.15 + Math.sin(z * 0.19 + x * 0.13) * 0.05;
+  for (let i = 0; i < rp.count; i++) {
+    const x = rp.getX(i), z = rp.getZ(i);
+    const across = 1 - Math.pow(Math.abs(x) / 110, 2);
+    const h = Math.max(0, (noise(x, z) * 0.5 + 0.55) * 95 * across) - 4;
+    rp.setY(i, h);
   }
-  scene.add(new THREE.Mesh(mergeGeos(hills), new THREE.MeshLambertMaterial({ color: 0x9b8566, flatShading: true })));
+  ridge.computeVertexNormals();
+  const ridgeMesh = new THREE.Mesh(ridge, new THREE.MeshLambertMaterial({ color: 0xa48d6c }));
+  ridgeMesh.position.set(470, 0, 0);
+  scene.add(ridgeMesh);
 
   // map boxes merged per material
   const byMat = {};
   for (const b of C.MAP.boxes) {
     if (b.hidden || b.trunk) continue;
-    (byMat[b.mat] = byMat[b.mat] || []).push(b);
+    // props get their own meshes so a real model can replace them once it loads
+    const key = b.prop && PROP_MODELS[b.prop] ? 'prop:' + b.prop : b.mat;
+    (byMat[key] = byMat[key] || []).push(b);
   }
-  for (const [mat, list] of Object.entries(byMat)) {
+  for (const [key, list] of Object.entries(byMat)) {
+    const mat = list[0].mat;
     const def = MATDEF[mat] || [null, 2];
     const mesh = new THREE.Mesh(boxGeometry(list, def[1] || 2, def[3]), materials[mat] || materials.mud);
     mesh.castShadow = mat !== 'window';
     mesh.receiveShadow = true;
     scene.add(mesh);
+    worldMeshes[key] = mesh;
   }
 
   // palms
@@ -439,7 +458,7 @@ function buildWorld() {
     }
   }, 128);
   const barkMat = new THREE.MeshLambertMaterial({ map: bark });
-  const leafMat = new THREE.MeshLambertMaterial({ map: leaf, alphaTest: 0.5, side: THREE.DoubleSide });
+  const leafMat = new THREE.MeshLambertMaterial({ map: leaf, alphaTest: 0.5, side: THREE.DoubleSide, emissive: 0x1c2a10 });
   for (const p of C.MAP.palms) {
     const lean = (rand() - 0.5) * 1.2, leanZ = (rand() - 0.5) * 1.2;
     const trunk = new THREE.CylinderGeometry(0.17, 0.27, p.h, 8, 8);
@@ -675,6 +694,84 @@ function stats(key) {
   return statCache[k] || (statCache[k] = C.weaponStats(key, att));
 }
 let waterTex = null;
+const worldMeshes = {}, worldPlanes = {};
+let post = null;
+
+// ---------- Graphics upgrade (loads in the background; the game is playable before it finishes) ----------
+// Photo-scanned materials per map surface: [texture id, tile size in metres, tint, extra options]
+const PBR_DEFS = {
+  mud: ['clay_plaster', 2.6, 0xf2e2c8], mud2: ['patterned_clay_plaster', 3, 0xf6e6cc], plaster: ['grey_plaster_02', 3, 0xf6e8d0],
+  roof: ['clay_plaster', 3, 0xc4ad8c], stone: ['large_sandstone_blocks', 2.4, 0xf0dcb8], concrete: ['brushed_concrete', 3, 0xe6e0d4],
+  perimeter: ['concrete_block_wall', 3.2, 0xe8d4b0], corrugated: ['corrugated_iron_02', 2.2, 0xcfc8b8, { gray: true, metal: 0.15 }],
+  roofmetal: ['rusty_corrugated_iron', 2.6, 0xa89c92, { metal: 0.3 }], rust: ['rusty_metal_02', 2.2, 0xffffff, { metal: 0.3 }],
+  burnt: ['rusty_metal_02', 2.2, 0x5a4c42, { metal: 0.25 }], metal: ['metal_plate', 1.4, 0xb8bcbe, { metal: 0.6 }],
+  cont_red: ['container_side', 2.6, 0xb03a2a, { gray: true, metal: 0.35 }], cont_blue: ['container_side', 2.6, 0x34598a, { gray: true, metal: 0.35 }],
+  cont_green: ['container_side', 2.6, 0x41704a, { gray: true, metal: 0.35 }], cont_orange: ['container_side', 2.6, 0xc96a2a, { gray: true, metal: 0.35 }],
+  cont_gray: ['container_side', 2.6, 0x8d9297, { gray: true, metal: 0.35 }], barrier: ['brushed_concrete', 2, 0xd8d2c6],
+};
+const PROP_MODELS = { crate: 'wooden_crate_02', barrel_red: 'Barrel_01', barrel_blue: 'barrel_03', jerrycan: 'metal_jerrycan_green', ammo: 'ammo_box' };
+
+async function upgradeGraphics() {
+  const t0 = performance.now();
+  const jobs = [];
+  // sky + lighting
+  jobs.push(loadSky(renderer, 'kloofendal_43d_clear_puresky_2k.hdr').then((sky) => {
+    scene.background = sky.background;
+    scene.environment = sky.env;
+    vmScene.environment = sky.env;
+    scene.environmentIntensity = 0.75;
+    vmScene.environmentIntensity = 0.35;
+    skyMesh.visible = false;
+    if (sky.sunDir.y > 0.2) SUN_DIR.copy(sky.sunDir);
+    SUN_DIR.y = Math.max(SUN_DIR.y, 0.45); SUN_DIR.normalize();
+    const h = sky.horizon, m = Math.max(h.r, h.g, h.b) || 1;
+    // haze: the sky's horizon colour pulled toward desert dust so distant shapes don't wash out to white
+    FOG.setRGB(h.r / m, h.g / m, h.b / m).lerp(new THREE.Color(0xc9b48e), 0.55).multiplyScalar(0.86);
+    scene.fog.color.copy(FOG);
+    hemi.intensity = 0.45;
+    sun.intensity = 2.4;
+    const w = worldPlanes.water;
+    if (w) w.material = new THREE.MeshStandardMaterial({ map: waterTex, color: 0xb8d4dc, roughness: 0.08, metalness: 0.1 });
+  }).catch((e) => console.warn('sky failed to load', e)));
+  // photo-scanned surfaces
+  for (const [mat, [id, tile, tint, o]] of Object.entries(PBR_DEFS)) {
+    jobs.push(loadPBR(Object.assign({ id, tint }, o)).then((m) => {
+      materials[mat] = m;
+      if (worldMeshes[mat]) {
+        // world-space UVs were built for the procedural tile size; rescale for this texture
+        const old = (MATDEF[mat] && MATDEF[mat][1]) || 2;
+        for (const k of ['map', 'normalMap', 'roughnessMap']) { m[k] = m[k].clone(); m[k].needsUpdate = true; m[k].repeat.set(old / tile, old / tile); }
+        worldMeshes[mat].material = m;
+      }
+    }).catch((e) => console.warn('material failed', mat, e)));
+  }
+  const planes = [['ground', 'dense_sand', (C.MAP.quay + 300) / 5, 600 / 5, 0xf4e2c4], ['ns', 'dense_sand', 12 / 3, 154 / 3, 0xa59682],
+    ['ew', 'dense_sand', 12 / 3, (C.MAP.quay + 77) / 3, 0xa59682], ['plaza', 'rectangular_paving', 32 / 2.4, 32 / 2.4, 0xf2e2c6],
+    ['apron', 'dirty_concrete', (C.MAP.quay - 17) / 4, 154 / 4, 0xe8e2d6]];
+  for (const [key, id, rx, ry, tint] of planes) {
+    jobs.push(loadPBR({ id, tint }).then((m) => {
+      const pl = worldPlanes[key];
+      if (!pl) return;
+      const mat = withRepeat(m, rx, ry);
+      for (const k of ['polygonOffset', 'polygonOffsetFactor', 'polygonOffsetUnits']) mat[k] = pl.material[k];
+      pl.material = mat;
+    }).catch((e) => console.warn('ground material failed', key, e)));
+  }
+  // real prop models in place of the box stand-ins
+  for (const [type, id] of Object.entries(PROP_MODELS)) {
+    jobs.push(loadProp(id).then((prop) => {
+      const boxes = C.MAP.boxes.filter((b) => b.prop === type);
+      if (boxes.length) {
+        scene.add(instanceProp(prop, boxes.map((b) => ({ min: b.min, max: b.max, rot: b.rot || 0 }))));
+        if (worldMeshes['prop:' + type]) worldMeshes['prop:' + type].visible = false;
+      }
+      const deco = C.MAP.decoProps.filter((d) => d.type === type);
+      if (deco.length) scene.add(instanceProp(prop, deco.map((d) => ({ x: d.x, z: d.z, rot: d.rot, s: 1 }))));
+    }).catch((e) => console.warn('prop failed', type, e)));
+  }
+  await Promise.all(jobs);
+  console.log(`graphics upgrade ready in ${Math.round(performance.now() - t0)} ms`);
+}
 const keys = Object.create(null);
 const mouse = { fire: false, ads: false };
 let jumpQueued = false, locked = false, chatOpen = false;
@@ -1736,16 +1833,19 @@ function renderSettings(el) {
     <div class="slider"><span>Sensitivity</span><input type="range" min="0.2" max="3" step="0.05" data-s="sens"><span></span></div>
     <div class="slider"><span>Field of view</span><input type="range" min="60" max="100" step="1" data-s="fov"><span></span></div>
     <div class="slider"><span>Volume</span><input type="range" min="0" max="1" step="0.05" data-s="volume"><span></span></div>
-    <div class="slider"><span>Shadows</span><input type="checkbox" data-s="shadows" style="justify-self:start"><span></span></div>`;
+    <div class="slider"><span>Shadows</span><input type="checkbox" data-s="shadows" style="justify-self:start"><span></span></div>
+    <div class="slider"><span>Graphics</span><select data-s="gfx" style="background:rgba(0,0,0,.45);color:var(--ink);border:1px solid var(--line);padding:4px"><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select><span></span></div>`;
   el.querySelectorAll('[data-s]').forEach((inp) => {
     const key = inp.dataset.s, out = inp.nextElementSibling;
-    const show = () => { out.textContent = inp.type === 'checkbox' ? '' : key === 'volume' ? Math.round(settings[key] * 100) + '%' : String(settings[key]); };
+    const show = () => { out.textContent = inp.type === 'checkbox' || inp.tagName === 'SELECT' ? '' : key === 'volume' ? Math.round(settings[key] * 100) + '%' : String(settings[key]); };
     if (inp.type === 'checkbox') inp.checked = settings[key]; else inp.value = settings[key];
     show();
     inp.addEventListener('input', () => {
-      settings[key] = inp.type === 'checkbox' ? inp.checked : parseFloat(inp.value);
+      settings[key] = inp.type === 'checkbox' ? inp.checked : inp.tagName === 'SELECT' ? inp.value : parseFloat(inp.value);
       if (key === 'volume') audio.setVolume(settings.volume);
       if (key === 'shadows') sun.castShadow = settings.shadows;
+      if (key === 'gfx' && post) post.setQuality(settings.gfx);
+      document.querySelectorAll('[data-s="gfx"]').forEach((x) => { x.value = settings.gfx; });
       saveSettings(); show();
     });
   });
@@ -1878,6 +1978,7 @@ function steamAchievement(name) { if (STEAM) STEAM.achievement(name); }
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  if (post) post.setSize(innerWidth, innerHeight);
 });
 
 let lastT = performance.now(), sendAcc = 0, pingAcc = 0;
@@ -1915,9 +2016,14 @@ function step(dt, now) {
   boomLight.intensity *= Math.exp(-dt * 6);
   sun.target.position.set(Math.round(camera.position.x / 4) * 4, 0, Math.round(camera.position.z / 4) * 4);
   sun.position.copy(sun.target.position).addScaledVector(SUN_DIR, 160);
-  sky.position.copy(camera.position);
+  skyMesh.position.copy(camera.position);
   if (waterTex) { waterTex.offset.x = (now * 0.000004) % 1; waterTex.offset.y = (now * 0.0000025) % 1; }
 
+  if (post && settings.gfx !== 'low') {
+    post.viewmodel.enabled = vm.visible && state === 'game';
+    post.composer.render(dt);
+    return;
+  }
   renderer.autoClear = true;
   renderer.render(scene, camera);
   if (vm.visible && state === 'game') {
@@ -1929,6 +2035,8 @@ function step(dt, now) {
 
 buildWorld();
 initMenu();
+try { post = createPost(renderer, scene, camera, vmScene, vmCam); post.setQuality(settings.gfx); } catch (e) { console.warn('post-processing unavailable', e); }
+upgradeGraphics();
 frame();
 // debug/test hook (used by automated playtests; harmless in normal play)
 window.__game = { me, remotes, roster, settings, scene, renderer, camera, keys, mouse, state: () => state, setLocked: (v) => { locked = v; }, freeze: (v) => { debugFreeze = v; }, bullets,

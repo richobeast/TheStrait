@@ -1,0 +1,7 @@
+# Asset files are binary: never convert line endings
+*.hdr binary
+*.bin binary
+*.jpg binary
+*.png binary
+*.ico binary
+*.glb binary

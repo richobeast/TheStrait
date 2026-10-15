@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "server": "node server.js",
-    "package": "electron-packager . TheStrait --platform=win32 --arch=x64 --out=dist --overwrite --icon=desktop/icon.ico --app-copyright=\"The Strait!\" --app-version=0.0.1 --build-version=0.0.1 --ignore=\"^/dist\" --ignore=\"^/steam\" --ignore=\"^/[.]claude\" --ignore=\"node_modules/three/(examples|src|docs)\" --prune=true"
+    "package": "electron-packager . TheStrait --platform=win32 --arch=x64 --out=dist --overwrite --icon=desktop/icon.ico --app-copyright=\"The Strait!\" --app-version=0.0.1 --build-version=0.0.1 --ignore=\"^/dist\" --ignore=\"^/steam\" --ignore=\"^/[.]claude\" --ignore=\"node_modules/three/(src|docs)\" --ignore=\"node_modules/three/examples/(?!jsm)\" --ignore=\"node_modules/three/examples/jsm/libs\" --prune=true"
   },
   "dependencies": {
     "steamworks.js": "^0.4.0",

@@ -24,13 +24,22 @@ Press **F11** in the desktop app for fullscreen.
   - Muzzle: suppressor (quiet, keeps you off the enemy minimap, shorter range), compensator (−28% recoil)
   - Underbarrel: vertical grip (−15% recoil), laser (−35% hip-fire spread)
   - Magazine: extended (+50% ammo, slower reload)
+- **Gun combat:**
+  - Bullets travel at real muzzle velocities with gravity drop.
+  - Rounds go through thin cover (wood, sheet metal, containers, cars, plaster) at reduced damage; concrete, stone, HESCO and sandbags stop everything.
+  - Each gun recoils in a fixed pattern you can learn and pull down.
+  - Lean around corners with Q / E.
+  - Scoped weapons sway; hold Shift to hold your breath.
+  - Damage numbers and headshot / kill sounds confirm hits.
 - Bots fill empty slots (0–14) with random attachments, and step aside as real players join.
 
 | Key | Action |
 |---|---|
 | WASD / Shift / Space / C | Move / Sprint / Jump / Crouch |
 | Left / Right mouse | Fire / Aim down sights |
-| R, 1, 2, Q, wheel | Reload, switch weapons |
+| R, 1, 2, wheel | Reload, switch weapons |
+| Q / E | Lean left / right |
+| Shift (while scoped) | Hold breath |
 | G | Throw grenade |
 | Tab / Enter / Esc | Scoreboard / Chat / Pause menu |
 
@@ -41,6 +50,8 @@ Press **F11** in the desktop app for fullscreen.
 | `server.js` | Authoritative game server: hit validation, damage, grenades, respawns, scoring, bot AI with A* pathfinding |
 | `public/game.js` | Game client: rendering, movement, weapons, effects, HUD, gunsmith menu, synthesized audio |
 | `public/models.js` | Procedural models: guns from real side profiles, attachments, soldiers, first-person arms, camo |
+| `public/graphics.js` | Post-processing, HDRI sky and lighting, photo-scanned materials, prop models |
+| `public/assets/` | CC0 textures, sky and models from Poly Haven (see `CREDITS.md`) |
 | `desktop/main.js` | Electron app: runs a local server, window, Steam IPC |
 | `desktop/steam.js` | Steamworks: lobbies, invites, rich presence, achievements, P2P relay |
 | `steam/` | SteamPipe upload script and the release checklist (`steam/RELEASE.md`) |
@@ -51,4 +62,5 @@ The game uses Valve's test App ID **480** until you have your own. See `steam/RE
 ## Known limits
 - Hit detection is client-reported with server-side checks (line of sight, range, fire rate, teams). That's fine among friends; public servers would need stronger anti-cheat.
 - Steam P2P hosting and joining haven't been tested end to end yet. That needs two Steam accounts on two PCs.
-- Models and textures are generated in code (no asset files). They're much more detailed than the first version but still stylized; artist-made models and recorded audio would be the next big upgrade.
+- The world uses photo-scanned textures, a real sky and real prop models, but soldiers, guns and vehicles are still built in code. Artist-made character and weapon models (usually paid assets) and recorded audio would be the next big upgrades.
+- Graphics default to High. On weaker PCs, switch to Medium (no ambient occlusion) or Low (no post-processing) in Settings.

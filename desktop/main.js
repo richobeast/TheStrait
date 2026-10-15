@@ -52,6 +52,7 @@ async function smokeTest() {
     await new Promise((r) => setTimeout(r, 2500));
     out.state = window.__game.state(); out.alive = window.__game.me.alive; out.remotes = window.__game.remotes.size;
     out.renderCalls = window.__game.renderer.info.render.calls;
+    out.hdriSky = !!(window.__game.scene.background && window.__game.scene.background.isTexture);
     return out;
   })()`;
   try { console.log('[smoke]', JSON.stringify(await win.webContents.executeJavaScript(js))); }

@@ -203,7 +203,7 @@ function startServer(opts = {}) {
     return {
       id: nextId++, name, team, bot, ws: null, x: 0, y: 0, z: 0, ry: 0, rx: 0, crouch: 0, w: 0, moving: 0,
       alive: false, hp: 100, kills: 0, deaths: 0, lastDamage: 0, lastFire: {}, respawnAt: Date.now(),
-      primary: 'rifle', nextPrimary: 'rifle', att: defaultAtt(), nextAtt: defaultAtt(), attKey: '', nades: C.PLAYER.nades, protectUntil: 0, spawnedAt: 0, lastChat: 0, ai: null, lastSt: 0, lastTp: 0,
+      primary: 'rifle', nextPrimary: 'rifle', att: defaultAtt(), nextAtt: defaultAtt(), attKey: '', nades: C.PLAYER.nades, protectUntil: 0, spawnedAt: 0, lastChat: 0, ai: null, lastSt: 0, lastTp: 0, lean: 0, shots: new Map(),
     };
   }
 
@@ -246,7 +246,7 @@ function startServer(opts = {}) {
       if (sc > bestScore) { bestScore = sc; best = s; }
     }
     p.x = best[0] + (Math.random() - 0.5) * 0.6; p.y = 0; p.z = best[2] + (Math.random() - 0.5) * 0.6;
-    p.ry = p.team === 1 ? 0 : Math.PI; p.rx = 0; p.crouch = 0; p.moving = 0;
+    p.ry = p.team === 1 ? 0 : Math.PI; p.rx = 0; p.crouch = 0; p.moving = 0; p.lean = 0; p.shots.clear();
     p.alive = true; p.hp = C.PLAYER.maxHp; p.nades = C.PLAYER.nades;
     p.primary = p.nextPrimary; p.w = WEAPON_INDEX[p.primary];
     p.att = p.nextAtt;
@@ -262,7 +262,7 @@ function startServer(opts = {}) {
     if (attChanged) broadcastRoster();
   }
 
-  function applyDamage(victim, attacker, dmg, weapon, head) {
+  function applyDamage(victim, attacker, dmg, weapon, head, pt) {
     const now = Date.now();
     if (!victim.alive || phase !== 'playing') return;
     if (victim.protectUntil > now && attacker !== victim) return;
@@ -274,7 +274,7 @@ function startServer(opts = {}) {
       victim.ai.lastSeen = { x: attacker.x, z: attacker.z, t: now };
     }
     send(victim, { t: 'dmg', hp: Math.max(0, Math.ceil(victim.hp)), from: [r2(attacker.x), r2(attacker.z)], self: attacker === victim ? 1 : 0 });
-    if (attacker !== victim) send(attacker, { t: 'hm', h: head ? 1 : 0, k: victim.hp <= 0 ? 1 : 0 });
+    if (attacker !== victim) send(attacker, { t: 'hm', h: head ? 1 : 0, k: victim.hp <= 0 ? 1 : 0, d: dmg, p: (pt || [victim.x, victim.y + 1.2, victim.z]).map(r2) });
     if (victim.hp <= 0) kill(victim, attacker, weapon, head);
   }
 
@@ -309,8 +309,33 @@ function startServer(opts = {}) {
   // A target counts as visible if any of head, chest or knees has line of sight from the shooter.
   function visibleTarget(o, t) {
     if (Math.hypot(o[0] - t.x, o[2] - t.z) < 2.5) return true;
+    const [lx, lz] = C.leanOffset(t.lean, t.ry);
     const hh = t.crouch ? [1.1, 0.75, 0.35] : [1.6, 1.1, 0.45];
-    return hh.some((h) => C.canSee(o, [t.x, t.y + h, t.z]));
+    return hh.some((h, i) => C.canSee(o, [t.x + (i ? 0 : lx), t.y + h, t.z + (i ? 0 : lz)]));
+  }
+
+  // Could this bullet (shot origin + pellet direction) have reached the target, allowing for drop,
+  // target movement and wall penetration? Returns the best damage multiplier and distance, or null.
+  function bulletReach(shot, pel, t, head) {
+    const o = shot.o, dir = shot.dirs[pel], W = shot.W;
+    const [lx, lz] = C.leanOffset(t.lean, t.ry);
+    const pts = [];
+    if (head) pts.push([t.x + lx, t.y + (t.crouch ? 1.1 : 1.6), t.z + lz]);
+    pts.push([t.x, t.y + (t.crouch ? 0.75 : 1.1), t.z], [t.x, t.y + 0.45, t.z]);
+    let best = null;
+    for (const pt of pts) {
+      const v = [pt[0] - o[0], pt[1] - o[1], pt[2] - o[2]];
+      const dist = Math.hypot(v[0], v[1], v[2]);
+      if (dist > W.range + 5 || dist < 0.01) continue;
+      const u = [v[0] / dist, v[1] / dist, v[2] / dist];
+      const cos = clamp(u[0] * dir[0] + u[1] * dir[1] + u[2] * dir[2], -1, 1);
+      const tol = Math.atan2(3.0, dist) + 0.06 + (W.pellets > 1 ? 0.12 : 0);
+      if (Math.acos(cos) > tol) continue;
+      const tr = C.penTrace(o, u, Math.max(0, dist - 0.3), W.pen);
+      if (tr.stop < dist - 0.35) continue;
+      if (!best || tr.mult > best.mult) best = { mult: tr.mult, dist, pt };
+    }
+    return best;
   }
 
   // ---------- Bots ----------
@@ -523,6 +548,7 @@ function startServer(opts = {}) {
         p.crouch = msg.c ? 1 : 0;
         p.moving = msg.m ? 1 : 0;
         if (msg.w === 3 || msg.w === WEAPON_INDEX[p.primary]) p.w = msg.w;
+        p.lean = Number.isFinite(msg.l) ? clamp(msg.l, -1, 1) : 0;
         break;
       }
       case 'fire': {
@@ -535,25 +561,39 @@ function startServer(opts = {}) {
         const eye = eyeOf(p);
         let o = vec3(msg.o);
         if (!o || dist3(o, eye) > 2.5) o = eye;
-        const ends = Array.isArray(msg.e) ? msg.e.slice(0, W.pellets).map(vec3).filter(Boolean).map((v) => v.map(r2)) : [];
-        broadcast({ t: 'shot', id: p.id, w: msg.w, e: ends.length === 1 ? ends[0] : ends, s: W.suppressed ? 1 : 0 }, p);
-        if (!Array.isArray(msg.hits)) return;
+        // Bullets fly on the clients; remember the shot so later hit reports can be checked against it.
+        const dirs = (Array.isArray(msg.d) ? msg.d : []).slice(0, W.pellets).map(vec3).filter(Boolean)
+          .map((d) => { const l = Math.hypot(d[0], d[1], d[2]) || 1; return [d[0] / l, d[1] / l, d[2] / l]; });
+        if (!dirs.length) return;
+        const sid = msg.sid | 0;
+        p.shots.set(sid, { key, W, o, dirs, t: now, used: new Set() });
+        if (p.shots.size > 40) p.shots.delete(p.shots.keys().next().value);
+        broadcast({ t: 'shot', id: p.id, w: msg.w, o: o.map(r2), d: dirs.map((d) => d.map((c) => Math.round(c * 10000) / 10000)), s: W.suppressed ? 1 : 0 }, p);
+        break;
+      }
+      case 'hit': {
+        if (phase !== 'playing') return;
+        const shot = p.shots.get(msg.s | 0);
+        if (!shot || now - shot.t > 3000 || !Array.isArray(msg.h)) return;
         const tally = new Map();
-        for (const h of msg.hits.slice(0, W.pellets)) {
+        for (const h of msg.h.slice(0, shot.W.pellets)) {
           if (!Array.isArray(h)) continue;
-          const target = players.get(h[0] | 0);
+          const pel = h[0] | 0;
+          if (pel < 0 || pel >= shot.dirs.length || shot.used.has(pel)) continue;
+          const target = players.get(h[1] | 0);
           if (!target || !target.alive || target.team === p.team) continue;
-          const dist = Math.hypot(target.x - p.x, target.y - p.y, target.z - p.z);
-          if (dist > W.range + 4) continue;
-          if (!tally.has(target)) tally.set(target, visibleTarget(o, target) ? { dmg: 0, head: false } : null);
-          const t = tally.get(target);
-          if (!t) continue;
-          let dmg = W.dmg * (h[1] ? W.head : 1);
-          if (dist > W.falloff[0]) dmg *= W.falloff[1];
+          shot.used.add(pel);
+          const head = !!h[2];
+          const res = bulletReach(shot, pel, target, head);
+          if (!res) continue;
+          let dmg = shot.W.dmg * (head ? shot.W.head : 1) * res.mult;
+          if (res.dist > shot.W.falloff[0]) dmg *= shot.W.falloff[1];
+          const t = tally.get(target) || { dmg: 0, head: false, pt: res.pt };
           t.dmg += dmg;
-          if (h[1]) t.head = true;
+          if (head) { t.head = true; t.pt = res.pt; }
+          tally.set(target, t);
         }
-        for (const [target, t] of tally) if (t && t.dmg > 0) applyDamage(target, p, t.dmg, key, t.head);
+        for (const [target, t] of tally) applyDamage(target, p, t.dmg, shot.key, t.head, t.pt);
         break;
       }
       case 'nade': {
@@ -638,7 +678,7 @@ function startServer(opts = {}) {
     const now = Date.now();
     const ps = [];
     for (const p of players.values()) {
-      ps.push([p.id, r2(p.x), r2(p.y), r2(p.z), r2(p.ry), r2(p.rx), p.crouch, p.w, p.alive ? 1 : 0, Math.ceil(p.hp), p.moving]);
+      ps.push([p.id, r2(p.x), r2(p.y), r2(p.z), r2(p.ry), r2(p.rx), p.crouch, p.w, p.alive ? 1 : 0, Math.ceil(p.hp), p.moving, r2(p.lean)]);
     }
     broadcast({
       t: 'snap', ps, g: nades.map((n) => [n.id, r2(n.x), r2(n.y), r2(n.z)]),

@@ -544,31 +544,7 @@ function puff(pos, color, n, spread, size, life) {
   }
 }
 
-const tracers = [];
 const tracerGeo = new THREE.BoxGeometry(0.018, 0.018, 1); tracerGeo.translate(0, 0, -0.5);
-function addTracer(from, to, color = 0xffd890) {
-  let t = tracers.find((q) => !q.alive);
-  if (!t) {
-    if (tracers.length > 60) return;
-    t = { mesh: new THREE.Mesh(tracerGeo, new THREE.MeshBasicMaterial({ color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })) };
-    scene.add(t.mesh); tracers.push(t);
-  }
-  const len = from.distanceTo(to);
-  if (len < 0.5) return;
-  t.alive = true; t.mesh.visible = true; t.age = 0; t.life = 0.07;
-  t.mesh.material.color.set(color);
-  t.mesh.position.copy(from);
-  t.mesh.lookAt(to);
-  t.mesh.scale.set(1, 1, len);
-}
-function updateTracers(dt) {
-  for (const t of tracers) {
-    if (!t.alive) continue;
-    t.age += dt;
-    if (t.age > t.life) { t.alive = false; t.mesh.visible = false; continue; }
-    t.mesh.material.opacity = 0.9 * (1 - t.age / t.life);
-  }
-}
 
 const decals = [];
 let decalIdx = 0;
@@ -687,6 +663,7 @@ const me = {
   onGround: true, crouch: false, eyeH: P.eye, stepOff: 0, alive: false, hp: 100, team: 1,
   primary: 'rifle', slot: 0, ammo: {}, nades: 2, reloadEnd: 0, reloadKey: null, switchEnd: 0, nextFire: 0, nadeCd: 0, throwAt: 0,
   bloom: 0, ads: 0, sprint: 0, sprinting: false, moving: false, bob: 0, stepAcc: 0, spawnAt: 0, deathAt: 0, killerId: 0, streak: 0, lastKillAt: 0, multi: 0,
+  lean: 0, climb: 0, burst: 0, lastShotAt: 0, breath: 1, breathOut: false, swayT: 0, swayAmp: 0, swayY: 0, swayP: 0, sid: 1,
 };
 const curKey = () => (me.slot === 0 ? me.primary : 'pistol');
 me.att = settings.att;
@@ -776,7 +753,12 @@ const audio = (() => {
       burst({ freq: 1500, type: 'bandpass', q: 4, dur: 0.07, vol: 0.35, delay: dur * 0.55 });
       burst({ freq: 2600, type: 'bandpass', q: 5, dur: 0.05, vol: 0.35, delay: dur * 0.85 });
     },
-    hit(head) { tone({ f0: head ? 1900 : 1500, dur: 0.06, vol: 0.18, type: 'triangle' }); if (head) tone({ f0: 2600, dur: 0.25, vol: 0.12, delay: 0.03 }); },
+    hit(head, kill) {
+      burst({ freq: 900, dur: 0.06, vol: 0.32, q: 0.9 });
+      tone({ f0: 1500, dur: 0.045, vol: 0.12, type: 'triangle' });
+      if (head) { tone({ f0: 3150, dur: 0.32, vol: 0.13, delay: 0.01 }); tone({ f0: 4120, dur: 0.22, vol: 0.07, delay: 0.01 }); }
+      if (kill) tone({ f0: 75, f1: 40, dur: 0.3, vol: 0.5, delay: 0.02 });
+    },
     kill() { tone({ f0: 880, dur: 0.12, vol: 0.18, type: 'square' }); tone({ f0: 1320, dur: 0.2, vol: 0.15, type: 'square', delay: 0.08 }); },
     boom(dist, pan) {
       const att = 1 / (1 + dist / 20);
@@ -892,20 +874,6 @@ function camBasis() {
   camRight.setFromMatrixColumn(camera.matrixWorld, 0);
   camUp.setFromMatrixColumn(camera.matrixWorld, 1);
 }
-function castRay(o, d, maxDist) {
-  const oa = [o.x, o.y, o.z], da = [d.x, d.y, d.z];
-  let best = maxDist, box = null, player = null, head = false;
-  for (const b of C.MAP.solids) { const t = C.rayBox(oa, da, b.min, b.max); if (t >= 0 && t < best) { best = t; box = b; } }
-  for (const r of remotes.values()) {
-    if (!r.alive) continue;
-    const hb = C.hitboxes(r.pos.x, r.pos.y, r.pos.z, r.crouch);
-    let t = C.rayBox(oa, da, hb.head.min, hb.head.max);
-    if (t >= 0 && t < best) { best = t; player = r; head = true; box = null; }
-    t = C.rayBox(oa, da, hb.body.min, hb.body.max);
-    if (t >= 0 && t < best) { best = t; player = r; head = false; box = null; }
-  }
-  return { t: best, box, player, head };
-}
 function boxNormal(b, p) {
   const e = 0.03;
   if (Math.abs(p.x - b.min[0]) < e) return _v2.set(-1, 0, 0);
@@ -938,28 +906,24 @@ function tryFire(now) {
   camBasis();
   const origin = camera.position.clone();
   const spread = currentSpread(W);
-  const hits = [], ends = [];
   const muzzle = _v.copy(camRight).multiplyScalar(0.18 * (1 - me.ads)).addScaledVector(camUp, -0.12).addScaledVector(camFwd, 0.6).add(origin).clone();
+  const sid = me.sid++, dirs = [];
   for (let i = 0; i < W.pellets; i++) {
     const r = spread * Math.sqrt(Math.random()), ang = Math.random() * Math.PI * 2;
     const dir = camFwd.clone().addScaledVector(camRight, Math.cos(ang) * r).addScaledVector(camUp, Math.sin(ang) * r).normalize();
-    const res = castRay(origin, dir, W.range);
-    const end = origin.clone().addScaledVector(dir, res.t);
-    ends.push([r2(end.x), r2(end.y), r2(end.z)]);
-    if (res.player) {
-      if (res.player.team !== me.team) { hits.push([res.player.id, res.head ? 1 : 0]); puff(end, 0x8a1010, 3, 1.2, 0.18, 0.35); }
-    } else if (res.box) {
-      puff(end, 0xcdb48a, 2, 1.2, 0.22, 0.6);
-      if (res.t < 120) addDecal(end, boxNormal(res.box, end));
-    }
-    if (i === 0 || i % 3 === 0) addTracer(muzzle, end);
+    dirs.push([dir.x, dir.y, dir.z].map((c) => Math.round(c * 10000) / 10000));
+    spawnBullet(origin, dir, W.velocity, { mine: true, sid, pel: i, power: W.pen, range: W.range, from: muzzle, tracer: i % 3 === 0 });
   }
-  send({ t: 'fire', w: WKEYS.indexOf(key), o: [r2(origin.x), r2(origin.y), r2(origin.z)], e: ends, hits });
-  // feel
-  const k = W.recoil * (me.ads > 0.5 ? 0.65 : 1) * (0.8 + Math.random() * 0.4) * (me.crouch ? 0.8 : 1);
-  me.pitch = clamp(me.pitch + k * 0.45, -1.54, 1.54);
-  me.recoil += k * 0.55;
-  me.yaw += (Math.random() - 0.5) * k * 0.6;
+  send({ t: 'fire', w: WKEYS.indexOf(key), o: [r2(origin.x), r2(origin.y), r2(origin.z)], d: dirs, sid });
+  // feel: every gun climbs in the same pattern each burst, so it can be learned and pulled down
+  if (now - me.lastShotAt > W.interval * 2.5) me.burst = 0;
+  me.lastShotAt = now;
+  const [kp, ky] = C.recoilAt(key, me.burst++);
+  const k = W.recoil * (me.ads > 0.5 ? 0.7 : 1) * (me.crouch ? 0.8 : 1);
+  me.pitch = clamp(me.pitch + k * kp * 0.5, -1.54, 1.54);
+  me.climb += k * kp * 0.5;
+  me.recoil += k * kp * 0.5;
+  me.yaw -= k * ky * 0.45 + (Math.random() - 0.5) * k * 0.08;
   me.bloom = Math.min(0.06, me.bloom + W.bloom);
   me.kick = Math.min(1.5, me.kick + (key === 'sniper' || key === 'shotgun' ? 1.2 : 0.5));
   vmFlash.visible = !W.suppressed; vmFlash.material.rotation = Math.random() * 6; me.flashUntil = now + 45;
@@ -978,6 +942,123 @@ function throwNade() {
   audio.throwNade();
 }
 
+// ---------- Bullets: travel time, drop and wall penetration ----------
+const bullets = [];
+const pendingHits = new Map(); // shot id -> [[pellet, target id, head], ...], flushed once per frame
+const bulletMeshes = [];
+const _bv = new THREE.Vector3(), _bp = new THREE.Vector3();
+const METALS = new Set(['rust', 'burnt', 'truck', 'humvee', 'metal', 'drum', 'drumred', 'corrugated', 'roofmetal', 'cont_red', 'cont_blue', 'cont_green', 'cont_orange', 'cont_gray', 'crane', 'tank', 'tire']);
+const WOODS = new Set(['wood', 'palm']);
+function impactFx(pos, normal, mat, decal = true) {
+  if (METALS.has(mat)) {
+    for (let i = 0; i < 6; i++) {
+      _v.set((Math.random() - 0.5) * 3, Math.random() * 3, (Math.random() - 0.5) * 3).addScaledVector(normal, 3);
+      spawnParticle(pos, _v, 0xffc46a, 0.05, 0, 0.22, 1, true, 14);
+    }
+    puff(pos, 0x8e8e8e, 1, 0.8, 0.14, 0.4);
+  } else if (WOODS.has(mat)) {
+    puff(pos, 0x8a6a45, 3, 1.4, 0.12, 0.5);
+    for (let i = 0; i < 3; i++) {
+      _v.copy(normal).multiplyScalar(2).add(_v2.set(Math.random() - 0.5, Math.random(), Math.random() - 0.5));
+      spawnParticle(pos, _v, 0x6e4a28, 0.04, 0, 0.5, 1, false, 12);
+    }
+  } else puff(pos, 0xcdb48a, 2, 1.2, 0.22, 0.6);
+  if (decal) addDecal(pos, normal);
+}
+function bulletMesh() {
+  let m = bulletMeshes.find((q) => !q.userData.busy);
+  if (!m) {
+    if (bulletMeshes.length > 80) return null;
+    m = new THREE.Mesh(tracerGeo, new THREE.MeshBasicMaterial({ color: 0xffd890, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    scene.add(m);
+    bulletMeshes.push(m);
+  }
+  m.userData.busy = true;
+  m.visible = false;
+  return m;
+}
+function spawnBullet(origin, dir, speed, o) {
+  bullets.push({
+    pos: origin.clone(), vel: dir.clone().multiplyScalar(speed), from: (o.from || origin).clone(),
+    dist: 0, maxDist: o.range, power: o.power || 0, mine: !!o.mine, enemy: !!o.enemy, sid: o.sid, pel: o.pel,
+    noDrop: !!o.noDrop, whizzed: false, mesh: o.tracer ? bulletMesh() : null,
+  });
+}
+function stepBullet(b, dt) {
+  if (!b.noDrop) b.vel.y -= C.BULLET_GRAVITY * dt;
+  const dir = _bv.copy(b.vel);
+  let len = dir.length() * dt;
+  dir.normalize();
+  if (b.dist + len > b.maxDist) len = Math.max(0, b.maxDist - b.dist);
+  const o = b.pos, oa = [o.x, o.y, o.z], da = [dir.x, dir.y, dir.z];
+  // players: only our own bullets can report hits
+  let hitR = null, hitT = Infinity, hitHead = false;
+  if (b.mine) {
+    for (const r of remotes.values()) {
+      if (!r.alive) continue;
+      const hb = C.hitboxes(r.pos.x, r.pos.y, r.pos.z, r.crouch, r.lean, r.ry);
+      let t = C.rayBox(oa, da, hb.head.min, hb.head.max);
+      if (t >= 0 && t <= len && t < hitT) { hitT = t; hitR = r; hitHead = true; }
+      t = C.rayBox(oa, da, hb.body.min, hb.body.max);
+      if (t >= 0 && t <= len && t < hitT) { hitT = t; hitR = r; hitHead = false; }
+    }
+  }
+  const tr = C.penTrace(oa, da, len, b.mine ? b.power : 0);
+  const wallT = tr.box ? tr.stop : Infinity;
+  const near = b.dist < 140;
+  for (const ps of tr.passed) {
+    if (ps.tin > Math.min(hitT, wallT)) break;
+    if (near) {
+      const a = _bp.copy(o).addScaledVector(dir, ps.tin).clone();
+      impactFx(a, boxNormal(ps.box, a).clone(), ps.box.mat);
+      puff(_bp.copy(o).addScaledVector(dir, ps.tout), 0xbfae8e, 1, 0.8, 0.15, 0.4);
+    }
+  }
+  if (hitR && hitT <= wallT) {
+    const at = _bp.copy(o).addScaledVector(dir, hitT);
+    if (hitR.team !== me.team) {
+      if (!pendingHits.has(b.sid)) pendingHits.set(b.sid, []);
+      pendingHits.get(b.sid).push([b.pel, hitR.id, hitHead ? 1 : 0]);
+      puff(at, 0x7a0d0d, 3, 1.2, 0.16, 0.35);
+    }
+    b.pos.copy(at);
+    return false;
+  }
+  if (tr.box && wallT <= len) {
+    const at = _bp.copy(o).addScaledVector(dir, wallT).clone();
+    if (near) impactFx(at, boxNormal(tr.box, at).clone(), tr.box.mat);
+    b.pos.copy(at);
+    return false;
+  }
+  if (b.mine) b.power = tr.power;
+  // an enemy round passing close to your head cracks past
+  if (!b.mine && b.enemy && !b.whizzed && me.alive) {
+    const ap = _bp.copy(camera.position).sub(o);
+    const t = ap.dot(dir);
+    if (t > 0 && t < len && ap.addScaledVector(dir, -t).length() < 1.6) { b.whizzed = true; audio.whiz(0); }
+  }
+  o.addScaledVector(dir, len);
+  b.dist += len;
+  return b.dist < b.maxDist - 0.01 && o.y > -3;
+}
+function updateBullets(dt) {
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    const alive = stepBullet(b, dt);
+    if (b.mesh) {
+      const tail = b.dist < 6 ? b.from : _bp.copy(b.vel).normalize().multiplyScalar(-6).add(b.pos);
+      const len = tail.distanceTo(b.pos);
+      if (len > 0.05) { b.mesh.position.copy(tail); b.mesh.lookAt(b.pos); b.mesh.scale.set(1, 1, len); b.mesh.visible = true; }
+    }
+    if (!alive) {
+      if (b.mesh) { b.mesh.visible = false; b.mesh.userData.busy = false; }
+      bullets.splice(i, 1);
+    }
+  }
+  for (const [sid, list] of pendingHits) send({ t: 'hit', s: sid, h: list });
+  pendingHits.clear();
+}
+
 // ---------- Local update ----------
 function updateLocal(dt, now) {
   if (!me.alive) return;
@@ -988,7 +1069,7 @@ function updateLocal(dt, now) {
   const wl = Math.hypot(wx, wz);
   if (wl > 0) { wx /= wl; wz /= wl; }
   const shift = keys.ShiftLeft || keys.ShiftRight;
-  if (shift && fwd > 0 && me.crouch) toggleCrouch();
+  if (shift && fwd > 0 && me.crouch && me.ads < 0.3) toggleCrouch();
   me.sprinting = !!shift && fwd > 0 && !me.crouch && me.ads < 0.3 && !mouse.fire && phase === 'playing';
   let speed = me.crouch ? P.crouchSpeed : me.sprinting ? P.sprint : P.walk;
   speed *= 1 - 0.45 * me.ads;
@@ -1019,6 +1100,26 @@ function updateLocal(dt, now) {
   me.bloom *= Math.exp(-5 * dt);
   me.recoil *= Math.exp(-9 * dt);
   me.kick *= Math.exp(-12 * dt);
+  // after a burst the view settles back down part of the way
+  if (me.climb > 0 && now - me.lastShotAt > W.interval * 1.6) { const rec = Math.min(me.climb, dt * 0.9); me.pitch -= rec * 0.65; me.climb -= rec; }
+  // lean with Q / E, never through walls
+  const leanIn = (keys.KeyE ? 1 : 0) - (keys.KeyQ ? 1 : 0);
+  me.lean += ((me.sprinting ? 0 : leanIn) - me.lean) * Math.min(1, dt * 9);
+  if (Math.abs(me.lean) > 0.01) {
+    const side = Math.sign(me.lean);
+    const t = C.rayMap([me.pos.x, me.pos.y + me.eyeH, me.pos.z], [Math.cos(me.yaw) * side, 0, -Math.sin(me.yaw) * side], C.LEAN.head + 0.3);
+    if (t >= 0) { const maxL = Math.max(0, (t - 0.3) / C.LEAN.head); if (Math.abs(me.lean) > maxL) me.lean = side * maxL; }
+  }
+  // scoped aim sways; hold Shift to hold your breath for a few seconds
+  const scoped = !!W.scope && me.ads > 0.6;
+  const holding = scoped && shift && !me.breathOut && me.breath > 0;
+  if (holding) { me.breath = Math.max(0, me.breath - dt / 4); if (me.breath === 0) me.breathOut = true; }
+  else { me.breath = Math.min(1, me.breath + dt / 3); if (me.breath > 0.6) me.breathOut = false; }
+  me.swayT += dt;
+  const amp = !scoped ? 0 : (W.scope === 'sniper' ? 0.0045 : 0.0018) * (me.crouch ? 0.6 : 1) * (me.moving ? 2 : 1) * (holding ? 0.08 : me.breathOut ? 1.8 : 1);
+  me.swayAmp += (amp - me.swayAmp) * Math.min(1, dt * 6);
+  me.swayY = me.swayAmp * (Math.sin(me.swayT * 0.9) + 0.4 * Math.sin(me.swayT * 2.1));
+  me.swayP = me.swayAmp * (0.8 * Math.sin(me.swayT * 1.3 + 1) + 0.5 * Math.sin(me.swayT * 0.55));
   if (me.flashUntil && now > me.flashUntil) { vmFlash.visible = false; me.flashUntil = 0; }
   void W;
 }
@@ -1032,8 +1133,9 @@ function updateCamera(dt, now) {
     return;
   }
   if (me.alive) {
-    camera.position.set(me.pos.x, me.pos.y + me.eyeH + me.stepOff, me.pos.z);
-    camera.rotation.set(me.pitch + me.recoil, me.yaw, 0);
+    const [lx, lz] = C.leanOffset(me.lean, me.yaw);
+    camera.position.set(me.pos.x + lx, me.pos.y + me.eyeH + me.stepOff - Math.abs(me.lean) * 0.06, me.pos.z + lz);
+    camera.rotation.set(me.pitch + me.recoil + me.swayP, me.yaw + me.swayY, -me.lean * 0.14);
   } else {
     // death cam: drop low and turn toward whoever killed you
     const t = clamp((now - me.deathAt) / 900, 0, 1);
@@ -1093,7 +1195,7 @@ function getRemote(id) {
   if (r) return r;
   const info = roster.get(id);
   r = { id, team: info ? info.team : 1, pos: new THREE.Vector3(), target: new THREE.Vector3(), ry: 0, tRy: 0, rx: 0, crouch: 0, w: 0,
-    alive: false, hp: 100, moving: 0, phase: 0, amt: 0, dyingAt: 0, spotted: 0, model: null, tag: null, last: new THREE.Vector3(), fresh: true };
+    alive: false, hp: 100, moving: 0, phase: 0, amt: 0, lean: 0, leanT: 0, dyingAt: 0, spotted: 0, model: null, tag: null, last: new THREE.Vector3(), fresh: true };
   remotes.set(id, r);
   buildRemoteModel(r);
   return r;
@@ -1142,7 +1244,8 @@ function updateRemotes(dt, now) {
     r.phase += dt * sp * 1.6;
     m.root.position.copy(r.pos);
     m.root.rotation.y = r.ry;
-    poseSoldier(m, r.phase, r.amt, !!r.crouch, r.rx);
+    r.lean += (r.leanT - r.lean) * Math.min(1, dt * 12);
+    poseSoldier(m, r.phase, r.amt, !!r.crouch, r.rx, r.lean);
     const key = remoteWeaponKey(r.w);
     if (key + JSON.stringify(remoteAtt(r, key)) !== m.attKey) buildRemoteModel(r);
   }
@@ -1212,11 +1315,11 @@ function onMessage(m) {
     case 'snap': {
       scores = m.sc; timeLeft = m.tl; timeAt = now; phase = m.ph;
       for (const e of m.ps) {
-        const [id, x, y, z, ry, rx, c, w, alive, hp, moving] = e;
+        const [id, x, y, z, ry, rx, c, w, alive, hp, moving, lean] = e;
         if (id === myId) { me.hp = hp; continue; }
         const r = getRemote(id);
         const wasAlive = r.alive;
-        r.target.set(x, y, z); r.tRy = ry; r.rx = rx; r.crouch = c; r.w = w; r.hp = hp; r.moving = moving;
+        r.target.set(x, y, z); r.tRy = ry; r.rx = rx; r.crouch = c; r.w = w; r.hp = hp; r.moving = moving; r.leanT = lean || 0;
         r.alive = !!alive;
         if ((r.alive && !wasAlive) || r.fresh) { r.pos.set(x, y, z); r.ry = ry; r.dyingAt = 0; r.fresh = false; }
       }
@@ -1253,7 +1356,8 @@ function onMessage(m) {
       hm.className = m.k ? 'kill' : m.h ? 'head' : '';
       hm.style.opacity = 1;
       clearTimeout(hm._t); hm._t = setTimeout(() => (hm.style.opacity = 0), m.k ? 300 : 120);
-      audio.hit(!!m.h);
+      audio.hit(!!m.h, !!m.k);
+      if (m.d && Array.isArray(m.p)) damageNumber(m.p, m.d, m.h, m.k);
       break;
     }
     case 'kill': onKill(m, now); break;
@@ -1280,18 +1384,17 @@ function onShot(m, now) {
   if (!r || !r.model) return;
   const key = remoteWeaponKey(m.w);
   const muzzle = remoteMuzzle(r);
-  const ends = Array.isArray(m.e) && Array.isArray(m.e[0]) ? m.e : m.e ? [m.e] : [];
-  let whizzed = false;
-  for (let i = 0; i < ends.length; i++) {
-    const end = new THREE.Vector3(ends[i][0], ends[i][1], ends[i][2]);
-    if (i % 3 === 0) addTracer(muzzle, end);
-    if (end.distanceTo(camera.position) > 1.5) puff(end, 0xcdb48a, 1, 1, 0.2, 0.5);
-    if (!whizzed && me.alive && r.team !== me.team) {
-      // near-miss crack when a bullet passes close to your head
-      const ab = _v.copy(end).sub(muzzle), ap = _v2.copy(camera.position).sub(muzzle);
-      const t = clamp(ap.dot(ab) / ab.lengthSq(), 0, 1);
-      const d = ap.sub(ab.multiplyScalar(t)).length();
-      if (d < 2 && t < 0.98) { audio.whiz(spatial(end)[1]); whizzed = true; }
+  const enemy = r.team !== me.team, W = C.WEAPONS[key];
+  if (Array.isArray(m.d) && Array.isArray(m.o)) {
+    const o = new THREE.Vector3(m.o[0], m.o[1], m.o[2]);
+    m.d.forEach((d, i) => spawnBullet(o, new THREE.Vector3(d[0], d[1], d[2]), W.velocity, { enemy, range: W.range, from: muzzle, tracer: i % 3 === 0 }));
+  } else {
+    // bots report where their round ended
+    const ends = Array.isArray(m.e) && Array.isArray(m.e[0]) ? m.e : m.e ? [m.e] : [];
+    for (const e of ends) {
+      const dir = new THREE.Vector3(e[0], e[1], e[2]).sub(muzzle);
+      const dist = dir.length();
+      spawnBullet(muzzle, dir.normalize(), W.velocity, { enemy, range: dist + 0.3, from: muzzle, tracer: true, noDrop: true });
     }
   }
   if (!m.s) muzzleFlash(muzzle, key === 'pistol' ? 0.35 : 0.6);
@@ -1322,8 +1425,8 @@ function onKill(m, now) {
     me.streak++;
     me.multi = now - me.lastKillAt < 4000 ? me.multi + 1 : 1;
     me.lastKillAt = now;
-    const label = m.w === 4 ? 'GRENADE KILL' : m.h ? 'HEADSHOT' : 'ENEMY KILLED';
-    centerMsg(label, m.h ? '+150' : '+100');
+    const label = m.w === 4 ? 'GRENADE' : m.h ? 'HEADSHOT' : 'KILL';
+    centerMsg(`ELIMINATED ${v ? v.name : ''}`, `${label} +${m.h ? 150 : 100}`);
     if (me.multi === 2) centerMsg('DOUBLE KILL', '+50');
     else if (me.multi === 3) centerMsg('TRIPLE KILL', '+100');
     else if (me.multi >= 4) centerMsg('MULTI KILL', '+150');
@@ -1401,6 +1504,30 @@ function updateHUD(dt, now) {
   setText('fps', `${fpsShown} FPS`);
   setText('ping', `${pingMs} ms`);
   drawMinimap(now);
+  updateDamageNumbers(now);
+  const showBreath = me.alive && !!W.scope && me.ads > 0.6;
+  $('breath').classList.toggle('hidden', !showBreath);
+  if (showBreath) { $('breath').firstElementChild.style.width = `${me.breath * 100}%`; $('breath').classList.toggle('out', me.breathOut); }
+}
+const dmgNums = [];
+function damageNumber(p, d, head, kill) {
+  const el = document.createElement('div');
+  el.className = 'dn' + (kill ? ' kill' : head ? ' head' : '');
+  el.textContent = kill ? `${d} \u2715` : String(d);
+  $('dmgNums').appendChild(el);
+  dmgNums.push({ el, pos: new THREE.Vector3(p[0] + (Math.random() - 0.5) * 0.3, p[1] + 0.2, p[2]), t0: performance.now() });
+  while (dmgNums.length > 12) dmgNums.shift().el.remove();
+}
+function updateDamageNumbers(now) {
+  for (let i = dmgNums.length - 1; i >= 0; i--) {
+    const n = dmgNums[i], age = (now - n.t0) / 900;
+    if (age >= 1) { n.el.remove(); dmgNums.splice(i, 1); continue; }
+    _v.copy(n.pos); _v.y += age * 0.7;
+    _v.project(camera);
+    if (_v.z > 1) { n.el.style.opacity = 0; continue; }
+    n.el.style.transform = `translate(${(_v.x * 0.5 + 0.5) * innerWidth}px, ${(-_v.y * 0.5 + 0.5) * innerHeight}px) translate(-50%, -50%) scale(${1 + (1 - age) * 0.25})`;
+    n.el.style.opacity = String(1 - age * age);
+  }
 }
 function flashDamage(v) { const vg = $('vignette'); vg._dmg = Math.max(vg._dmg || 0, v); }
 function flashScreen(v) { const f = $('flash'); f._v = Math.max(f._v || 0, v); }
@@ -1512,7 +1639,6 @@ addEventListener('keydown', (e) => {
     case 'KeyR': startReload(); break;
     case 'Digit1': switchTo(0); break;
     case 'Digit2': switchTo(1); break;
-    case 'KeyQ': switchTo(1 - me.slot); break;
     case 'KeyG': throwNade(); break;
     case 'KeyC': case 'ControlLeft': toggleCrouch(); break;
     case 'Space': jumpQueued = true; break;
@@ -1537,6 +1663,7 @@ addEventListener('mousemove', (e) => {
   const k = 0.0022 * settings.sens * (camera.fov / settings.fov);
   me.yaw -= e.movementX * k;
   me.pitch = clamp(me.pitch - e.movementY * k, -1.54, 1.54);
+  if (e.movementY > 0) me.climb = Math.max(0, me.climb - e.movementY * k); // pulling down pays off the climb
   sway.x += e.movementX; sway.y += e.movementY;
 });
 addEventListener('wheel', () => { if (locked && state === 'game') switchTo(1 - me.slot); });
@@ -1766,10 +1893,11 @@ function step(dt, now) {
     updateLocal(dt, now);
     updateRemotes(dt, now);
     updateNadeMeshes(dt);
+    updateBullets(dt);
     sendAcc += dt; pingAcc += dt;
     if (sendAcc >= 0.05) {
       sendAcc = 0;
-      if (me.alive) send({ t: 'st', p: [r2(me.pos.x), r2(me.pos.y), r2(me.pos.z)], ry: r3(me.yaw), rx: r3(me.pitch), c: me.crouch ? 1 : 0, w: WKEYS.indexOf(curKey()), m: me.moving ? 1 : 0 });
+      if (me.alive) send({ t: 'st', p: [r2(me.pos.x), r2(me.pos.y), r2(me.pos.z)], ry: r3(me.yaw), rx: r3(me.pitch), c: me.crouch ? 1 : 0, w: WKEYS.indexOf(curKey()), m: me.moving ? 1 : 0, l: r2(me.lean) });
     }
     if (pingAcc > 2) { pingAcc = 0; send({ t: 'ping', c: performance.now() }); }
   }
@@ -1781,7 +1909,7 @@ function step(dt, now) {
   }
   updateViewmodel(dt, now);
   if (state === 'game') updateHUD(dt, now);
-  updateParticles(dt); updateTracers(dt); updateFlashes(dt);
+  updateParticles(dt); updateFlashes(dt);
   updateAmbient(dt, now / 1000);
   flashLight.intensity *= Math.exp(-dt * 40);
   boomLight.intensity *= Math.exp(-dt * 6);
@@ -1803,7 +1931,7 @@ buildWorld();
 initMenu();
 frame();
 // debug/test hook (used by automated playtests; harmless in normal play)
-window.__game = { me, remotes, roster, settings, scene, renderer, camera, keys, mouse, state: () => state, setLocked: (v) => { locked = v; }, freeze: (v) => { debugFreeze = v; },
+window.__game = { me, remotes, roster, settings, scene, renderer, camera, keys, mouse, state: () => state, setLocked: (v) => { locked = v; }, freeze: (v) => { debugFreeze = v; }, bullets,
   loadout: (team, primary, att, slot = 0) => { me.team = team; me.primary = primary; me.att = Object.assign({}, me.att, att); me.slot = slot; refill(); buildViewmodel(); me.switchEnd = 0; }, jump: () => { jumpQueued = true; },
   // run N simulated frames synchronously (rAF is paused while the page is hidden)
   advance: (sec, fps = 60) => { const t0 = performance.now(); for (let i = 0; i < sec * fps; i++) step(1 / fps, t0 + (i * 1000) / fps); lastT = performance.now(); } };

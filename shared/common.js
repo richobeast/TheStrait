@@ -53,6 +53,34 @@
   C.PRIMARIES = ['rifle', 'shotgun', 'sniper'];
   C.NADE = { fuse: 2600, radius: 7.5, dmg: 140, gravity: 20 };
 
+  // ---------- Ballistics ----------
+  // Muzzle velocity (m/s) and penetration power per weapon. Bullets fly with real drop.
+  C.BULLET_GRAVITY = 9.8;
+  Object.assign(C.WEAPONS.rifle, { velocity: 880, pen: 1.0 });
+  Object.assign(C.WEAPONS.shotgun, { velocity: 420, pen: 0.25 });
+  Object.assign(C.WEAPONS.sniper, { velocity: 820, pen: 1.8 });
+  Object.assign(C.WEAPONS.pistol, { velocity: 370, pen: 0.45 });
+  C.LEAN = { head: 0.34, angle: 0.5 };
+
+  // What it costs a bullet to pass through each material (Infinity = stops every round).
+  const SOLID = Infinity;
+  C.PEN_COST = {
+    wood: 0.3, cloth1: 0.05, cloth2: 0.05, cloth3: 0.05, cloth4: 0.05, palm: 0.35,
+    corrugated: 0.45, roofmetal: 0.45, cont_red: 0.55, cont_blue: 0.55, cont_green: 0.55, cont_orange: 0.55, cont_gray: 0.55,
+    rust: 0.6, burnt: 0.6, truck: 0.6, tire: 0.5, drum: 0.4, drumred: 0.4, metal: 0.75, humvee: 0.95, tank: 1.2,
+    plaster: 1.0, mud: 1.2, mud2: 1.2, roof: 1.1, crane: 1.6,
+    stone: SOLID, concrete: SOLID, hesco: SOLID, sandbag: SOLID, perimeter: SOLID,
+  };
+  C.penCost = (mat) => (mat in C.PEN_COST ? C.PEN_COST[mat] : SOLID);
+
+  // Learnable recoil: shot i of a burst kicks by [pitch, yaw] multipliers that are the same every time.
+  C.recoilAt = function (key, i) {
+    const seed = { rifle: 1.3, shotgun: 0.4, sniper: 2.1, pistol: 0.9 }[key] || 1;
+    const pitch = 1 + 0.12 * Math.sin(i * 1.7 + seed);
+    const drift = i < 7 ? 0.35 : Math.sin((i - 7) * 0.45 + seed) * 0.8;
+    return [pitch, drift + 0.15 * Math.sin(i * 2.3 + seed * 3)];
+  };
+
   // ---------- Attachments ----------
   C.SLOTS = ['optic', 'muzzle', 'under', 'mag'];
   C.SLOT_LABELS = { optic: 'Optic', muzzle: 'Muzzle', under: 'Underbarrel', mag: 'Magazine' };
@@ -152,12 +180,65 @@
     return t < 0 || t >= dist - 0.25;
   };
 
-  C.hitboxes = function (x, y, z, crouch) {
+  // Leaning moves the head sideways (along the player's right vector) but not the body.
+  C.leanOffset = function (lean, ry) {
+    const o = (lean || 0) * C.LEAN.head;
+    return [Math.cos(ry || 0) * o, -Math.sin(ry || 0) * o];
+  };
+
+  C.hitboxes = function (x, y, z, crouch, lean, ry) {
     const h = crouch ? C.PLAYER.crouchHeight : C.PLAYER.height;
+    const [lx, lz] = C.leanOffset(lean, ry);
+    const hy = y + h - 0.38 - Math.abs(lean || 0) * 0.06;
     return {
       body: { min: [x - 0.36, y, z - 0.36], max: [x + 0.36, y + h - 0.38, z + 0.36] },
-      head: { min: [x - 0.2, y + h - 0.38, z - 0.2], max: [x + 0.2, y + h + 0.02, z + 0.2] },
+      head: { min: [x + lx - 0.2, hy, z + lz - 0.2], max: [x + lx + 0.2, hy + 0.4, z + lz + 0.2] },
     };
+  };
+
+  // Entry and exit distance of a ray through a box, or null.
+  C.rayBoxRange = function (o, d, min, max) {
+    let tmin = -Infinity, tmax = Infinity;
+    for (let i = 0; i < 3; i++) {
+      if (Math.abs(d[i]) < 1e-9) {
+        if (o[i] < min[i] || o[i] > max[i]) return null;
+      } else {
+        const inv = 1 / d[i];
+        let t1 = (min[i] - o[i]) * inv, t2 = (max[i] - o[i]) * inv;
+        if (t1 > t2) { const tt = t1; t1 = t2; t2 = tt; }
+        if (t1 > tmin) tmin = t1;
+        if (t2 < tmax) tmax = t2;
+        if (tmin > tmax) return null;
+      }
+    }
+    if (tmax < 0) return null;
+    return [Math.max(0, tmin), tmax];
+  };
+
+  // Straight bullet path through the map with penetration.
+  // Returns where it stopped (or maxDist), the damage multiplier left, power left and the boxes it passed.
+  C.penTrace = function (o, d, maxDist, power) {
+    const hits = [];
+    const solids = C.MAP.solids;
+    for (let i = 0; i < solids.length; i++) {
+      const b = solids[i];
+      if (b.nobullet) continue;
+      const r = C.rayBoxRange(o, d, b.min, b.max);
+      if (r && r[0] <= maxDist) hits.push([r[0], r[1], b]);
+    }
+    hits.sort((a, b) => a[0] - b[0]);
+    let mult = 1, left = power, reach = 0;
+    const passed = [];
+    for (const [tin, tout, b] of hits) {
+      if (tout <= reach) continue; // already inside an overlapping box we paid for
+      const cost = C.penCost(b.mat);
+      if (cost > left) return { stop: Math.max(tin, reach), mult, power: left, passed, box: b };
+      left -= cost;
+      mult *= Math.max(0.25, 1 - cost * 0.5);
+      reach = tout;
+      passed.push({ tin, tout, box: b });
+    }
+    return { stop: maxDist, mult, power: left, passed, box: null };
   };
 
   // Does an upright cylinder-ish AABB overlap any solid box?

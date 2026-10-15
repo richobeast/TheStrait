@@ -524,10 +524,11 @@ export function buildSoldier(team, id, key, att) {
 }
 
 // Animate the rig: phase advances with walking speed, amt 0..1 is stride strength.
-export function poseSoldier(m, phase, amt, crouch, pitch) {
+export function poseSoldier(m, phase, amt, crouch, pitch, lean = 0) {
   const hipY = crouch ? 0.56 : HIP_Y;
   m.upper.position.y = hipY;
   m.upper.rotation.x = pitch * 0.75;
+  m.upper.rotation.z = -lean * 0.5; // matches C.LEAN: the head moves about 0.34 m sideways
   m.head.rotation.x = pitch * 0.25;
   m.legs.forEach((leg, i) => {
     const ph = phase + (i ? Math.PI : 0);

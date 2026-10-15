@@ -23,7 +23,7 @@ pendingLobby = lobbyArg(process.argv);
 function createWindow() {
   win = new BrowserWindow({
     width: 1600, height: 900, minWidth: 1024, minHeight: 600,
-    backgroundColor: '#1a140d', title: 'Iraq Warfare (Beta 0.0.1)', autoHideMenuBar: true, show: false,
+    backgroundColor: '#1a140d', title: 'The Strait! (Beta 0.0.1)', autoHideMenuBar: true, show: false,
     icon: path.join(__dirname, 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
   });

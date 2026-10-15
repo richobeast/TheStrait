@@ -7,8 +7,8 @@
 const WebSocket = require('ws');
 const { WebSocketServer } = WebSocket;
 
-const GAME_TAG = 'iraqwarfare';
-const VERSION = '1';
+const GAME_TAG = 'thestrait';
+const VERSION = '2';
 const PKT = { HELLO: 1, DATA: 2, BYE: 3 };
 // steamworks.js exposes these as TypeScript const enums, so the numeric values are used directly
 const CB = { LobbyChatUpdate: 5, P2PSessionRequest: 6, GameLobbyJoinRequested: 8 };
@@ -171,7 +171,7 @@ async function findLobbies() {
   const list = await client.matchmaking.getLobbies();
   return list
     .filter((l) => l.getData('game') === GAME_TAG && l.getData('version') === VERSION)
-    .map((l) => ({ id: String(l.id), name: l.getData('name') || 'Iraq Warfare match', players: Number(l.getMemberCount()), max: Number(l.getMemberLimit() || 16) }));
+    .map((l) => ({ id: String(l.id), name: l.getData('name') || 'The Strait! match', players: Number(l.getMemberCount()), max: Number(l.getMemberLimit() || 16) }));
 }
 
 function leave() {

@@ -1,12 +1,12 @@
 {
-  "name": "iraq-warfare",
+  "name": "the-strait",
   "version": "0.0.1-beta",
-  "description": "Browser-based multiplayer team deathmatch shooter set in Iraq",
+  "description": "The Strait! - multiplayer team deathmatch shooter: U.S. Marines vs Iranian Forces at a port on the Strait of Hormuz",
   "main": "desktop/main.js",
   "scripts": {
     "start": "electron .",
     "server": "node server.js",
-    "package": "electron-packager . IraqWarfare --platform=win32 --arch=x64 --out=dist --overwrite --icon=desktop/icon.ico --app-copyright=\"Iraq Warfare\" --app-version=0.0.1 --build-version=0.0.1 --ignore=\"^/dist\" --ignore=\"^/steam\" --ignore=\"^/[.]claude\" --ignore=\"node_modules/three/(examples|src|docs)\" --prune=true"
+    "package": "electron-packager . TheStrait --platform=win32 --arch=x64 --out=dist --overwrite --icon=desktop/icon.ico --app-copyright=\"The Strait!\" --app-version=0.0.1 --build-version=0.0.1 --ignore=\"^/dist\" --ignore=\"^/steam\" --ignore=\"^/[.]claude\" --ignore=\"node_modules/three/(examples|src|docs)\" --prune=true"
   },
   "dependencies": {
     "steamworks.js": "^0.4.0",
@@ -17,6 +17,6 @@
     "@electron/packager": "^18.4.4",
     "electron": "^33.4.11"
   },
-  "productName": "Iraq Warfare",
+  "productName": "The Strait!",
   "steamAppId": 480
 }

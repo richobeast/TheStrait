@@ -1,8 +1,8 @@
 "AppBuild"
 {
 	"AppID"         "REPLACE_WITH_YOUR_APP_ID"
-	"Desc"          "Iraq Warfare Beta 0.0.1 (Windows)"
-	"ContentRoot"   "..\dist\IraqWarfare-win32-x64\"
+	"Desc"          "The Strait! Beta 0.0.1 (Windows)"
+	"ContentRoot"   "..\dist\TheStrait-win32-x64\"
 	"BuildOutput"   ".\output\"
 	"SetLive"       ""
 

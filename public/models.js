@@ -40,7 +40,8 @@ const M = {
   od: std(0x4e5540, 0.8, 0.05),
   wood: std(0x6a3b1c, 0.55, 0.0),
   bakelite: std(0x6b2c12, 0.4, 0.05),
-  glass: std(0x1a3550, 0.06, 0.6, { transparent: true, opacity: 0.5 }),
+  glass: std(0x9fc4e0, 0.05, 0.2, { transparent: true, opacity: 0.12, depthWrite: false }),
+  tube: std(0x1d1e1f, 0.6, 0.3, { side: THREE.DoubleSide }),
   red: new THREE.MeshBasicMaterial({ color: 0xff2a12 }),
   laser: new THREE.MeshBasicMaterial({ color: 0xff2020, transparent: true, opacity: 0.28, depthWrite: false }),
 };
@@ -85,8 +86,8 @@ function prof(pts, depth, bevel = 0.003, holes) {
   return g;
 }
 // Cylinder along the barrel axis from u0 (radius r0) to u1 (radius r1).
-function cyl(r0, r1, u0, u1, v, x = 0, seg = 14) {
-  const g = new THREE.CylinderGeometry(r1, r0, u1 - u0, seg);
+function cyl(r0, r1, u0, u1, v, x = 0, seg = 14, open = false) {
+  const g = new THREE.CylinderGeometry(r1, r0, u1 - u0, seg, 1, open);
   g.rotateX(-Math.PI / 2);
   g.translate(x, v, -(u0 + u1) / 2);
   return g;
@@ -127,7 +128,10 @@ function m4(P, a) {
   P.add(cyl(0.0095, 0.0095, 0.38, 0.5, 0.006), M.metal);
   P.add(prof([[0.365, -0.01], [0.395, -0.01], [0.39, 0.058], [0.371, 0.058]], 0.014), M.black);
   P.add(bx(0.004, 0.02, 0.004, 0.381, 0.068), M.black);
-  if (a.optic === 'none') P.add(prof([[-0.112, 0.046], [-0.084, 0.046], [-0.088, 0.077], [-0.108, 0.077]], 0.022), M.black);
+  if (a.optic === 'none') {
+    P.add(prof([[-0.112, 0.046], [-0.084, 0.046], [-0.086, 0.062], [-0.11, 0.062]], 0.022), M.black);
+    for (const x of [-0.008, 0.008]) P.add(bx(0.006, 0.02, 0.022, -0.098, 0.071, x), M.black);
+  }
   const mag = [[0.024, -0.07], [0.092, -0.07], [0.1, -0.13], [0.114, -0.19], [0.134, -0.24], [0.078, -0.255], [0.06, -0.2], [0.045, -0.14], [0.03, -0.1]];
   P.add(prof(a.mag === 'extended' ? stretch(mag, -0.075, 1.5) : mag, 0.026), M.fde);
   return { railU: -0.02, railV: 0.048, muzzleU: 0.5, muzzleV: 0.006, barrelR: 0.0095, defMuzzle: [0.011, 0.045, M.black],
@@ -176,7 +180,10 @@ function benelli(P, a) {
   P.add(prof(triggerGuard(-0.02), 0.008, 0.001), M.black);
   P.add(cyl(0.016, 0.016, -0.3, -0.12, 0.008), M.black);
   P.add(prof([[-0.215, 0.032], [-0.355, 0.032], [-0.372, 0.02], [-0.372, -0.088], [-0.352, -0.092], [-0.33, -0.062], [-0.25, -0.036], [-0.215, -0.02]], 0.05, 0.004), M.polymer);
-  if (a.optic === 'none') P.add(prof([[-0.09, 0.044], [-0.06, 0.044], [-0.064, 0.07], [-0.086, 0.07]], 0.024), M.black);
+  if (a.optic === 'none') {
+    P.add(prof([[-0.09, 0.044], [-0.06, 0.044], [-0.062, 0.055], [-0.088, 0.055]], 0.024), M.black);
+    for (const x of [-0.009, 0.009]) P.add(bx(0.006, 0.02, 0.02, -0.075, 0.064, x), M.black);
+  }
   P.add(bx(0.004, 0.018, 0.004, 0.55, 0.03), M.steel);
   const ext = a.mag === 'extended';
   if (ext) P.add(cyl(0.012, 0.012, 0.46, 0.53, -0.017), M.black);
@@ -252,14 +259,17 @@ function addOptic(P, d, a, key) {
   if (key === 'sniper') return d.ironY;
   if (a.optic === 'reddot') {
     if (d.pistol) {
-      P.add(bx(0.024, 0.02, 0.034, u, v + 0.01), M.black);
+      // open frame: base, two side posts and a top bar, so the window stays clear
+      P.add(bx(0.024, 0.007, 0.034, u, v + 0.0035), M.black);
+      for (const x of [-0.0105, 0.0105]) P.add(bx(0.003, 0.02, 0.012, u + 0.011, v + 0.016, x), M.black);
+      P.add(bx(0.024, 0.003, 0.012, u + 0.011, v + 0.0275), M.black);
       P.add(disc(0.008, u + 0.016, v + 0.016), M.glass);
       const dot = P.own(disc(0.0009, u + 0.015, v + 0.016), M.red); dot.userData.reticle = true;
       return v + 0.016;
     }
     P.add(bx(0.03, 0.016, 0.04, u, v + 0.008), M.black);
-    P.add(cyl(0.019, 0.019, u - 0.038, u + 0.038, v + 0.034), M.black);
-    P.add(cyl(0.021, 0.021, u + 0.03, u + 0.042, v + 0.034), M.black);
+    P.add(cyl(0.019, 0.019, u - 0.038, u + 0.038, v + 0.034, 0, 20, true), M.tube);
+    P.add(cyl(0.021, 0.021, u + 0.03, u + 0.042, v + 0.034, 0, 20, true), M.tube);
     P.add(disc(0.016, u + 0.043, v + 0.034), M.glass);
     P.add(bx(0.012, 0.012, 0.012, u, v + 0.058), M.black);
     P.add(cyl(0.008, 0.008, u - 0.01, u + 0.01, v + 0.034, 0.024), M.black);
